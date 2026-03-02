@@ -1,0 +1,12 @@
+services:
+  - type: web
+    name: llama-jobparser
+    runtime: python
+    buildCommand: pip install -r requirements.txt gunicorn
+    startCommand: gunicorn app:app --bind 0.0.0.0:$PORT --workers 2 --timeout 180
+    envVars:
+      - key: GROQ_API_KEY
+        sync: false
+      - key: GROQ_MODEL
+        value: llama-3.1-8b-instant
+    healthCheckPath: /health

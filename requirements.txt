@@ -8,4 +8,4 @@ docx2txt>=0.8
 pytesseract>=0.3
 Pillow>=10.0
 olefile>=0.47
-openpyxl>=3.1
+gunicorn>=21.2

@@ -292,28 +292,44 @@ def _extract_image_ocr(filepath):
 def _call_groq(messages, model=None, api_key=None, temperature=0.1, max_tokens=8192):
     key = api_key or GROQ_API_KEY
     mdl = model or GROQ_MODEL
-    resp = requests.post(
-        GROQ_URL,
-        headers={
-            "Authorization": f"Bearer {key}",
-            "Content-Type": "application/json",
-        },
-        json={
-            "model": mdl,
-            "messages": messages,
-            "temperature": temperature,
-            "top_p": 0.9,
-            "max_tokens": max_tokens,
-        },
-        timeout=120,
-    )
-    if resp.status_code != 200:
-        raise RuntimeError(f"Groq API error {resp.status_code}: {resp.text[:500]}")
-    data = resp.json()
-    content = data["choices"][0]["message"]["content"]
-    usage = data.get("usage", {})
-    finish = data["choices"][0].get("finish_reason", "unknown")
-    return content, usage, finish
+
+    max_retries = 5
+    for attempt in range(max_retries):
+        resp = requests.post(
+            GROQ_URL,
+            headers={
+                "Authorization": f"Bearer {key}",
+                "Content-Type": "application/json",
+            },
+            json={
+                "model": mdl,
+                "messages": messages,
+                "temperature": temperature,
+                "top_p": 0.9,
+                "max_tokens": max_tokens,
+            },
+            timeout=120,
+        )
+        if resp.status_code == 429:
+            # Rate limited — extract wait time and retry
+            try:
+                err_msg = resp.json().get("error", {}).get("message", "")
+                wait_match = re.search(r"try again in (\d+\.?\d*)s", err_msg)
+                wait_time = float(wait_match.group(1)) + 1 if wait_match else 20
+            except Exception:
+                wait_time = 20
+            if attempt < max_retries - 1:
+                time.sleep(wait_time)
+                continue
+        if resp.status_code != 200:
+            raise RuntimeError(f"Groq API error {resp.status_code}: {resp.text[:500]}")
+        data = resp.json()
+        content = data["choices"][0]["message"]["content"]
+        usage = data.get("usage", {})
+        finish = data["choices"][0].get("finish_reason", "unknown")
+        return content, usage, finish
+
+    raise RuntimeError("Groq API: max retries exceeded due to rate limiting")
 
 
 # ---------------------------------------------------------------------------
