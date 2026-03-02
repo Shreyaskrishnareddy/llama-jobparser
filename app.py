@@ -84,7 +84,6 @@ def health():
         "parser": "groq_jd_parser",
         "groq_configured": is_groq_configured(),
         "model": GROQ_MODEL,
-        "two_pass": True,
         "supported_formats": sorted(ALLOWED_EXTENSIONS),
         "max_bulk_files": BULK_MAX_FILES,
         "timestamp": time.time(),
@@ -191,6 +190,6 @@ if __name__ == "__main__":
     print(f"Starting Groq JD Parser on port {port}")
     print(f"Model: {GROQ_MODEL}")
     print(f"Groq API: {'configured' if is_groq_configured() else 'NOT SET'}")
-    print(f"Two-pass parsing: enabled (accuracy mode)")
+    print(f"Single-pass parsing: enabled")
     print(f"Formats: {', '.join(sorted(ALLOWED_EXTENSIONS))}")
     app.run(host="0.0.0.0", port=port, debug=True)

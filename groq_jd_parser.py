@@ -1,6 +1,6 @@
 """
 Groq JD Parser — Job Description Parser using Llama 3.1 8B via Groq
-Two-pass LLM extraction with confidence scoring and provenance tracking.
+Single-pass LLM extraction with confidence scoring and provenance tracking.
 Optimized for accuracy over speed.
 """
 
@@ -157,31 +157,6 @@ JD_TEXT_HERE
 
 Return ONLY the JSON object. No other text."""
 
-
-VALIDATION_PROMPT = r"""You are verifying a parsed job description. Below is the original JD text and the extracted JSON. CHECK every field and CORRECT any errors. Return the corrected JSON.
-
-VERIFICATION CHECKLIST:
-1. Every value MUST be traceable to the original text. Set fabricated values to null.
-2. Skills categories must be correct (programming_language vs framework vs tool etc).
-3. Salary numbers must be correctly converted (LPA=lakhs per annum, K=thousands).
-4. employment_type values must be normalized: "full_time", "part_time", "contract", "internship", "temporary", "freelance".
-5. work_mode must be: "remote", "hybrid", or "onsite".
-6. ALL responsibility and requirement bullets must be captured. Add any missing ones.
-7. Dates must be YYYY-MM-DD format.
-8. No duplicate skills.
-9. requirements, responsibilities, benefits MUST be arrays of plain strings, NOT objects.
-10. company MUST be a plain string, NOT an object.
-11. skills MUST have ONLY "name" and "category" keys per item.
-
-ORIGINAL JD:
----
-JD_TEXT_HERE
----
-
-EXTRACTED (verify and correct):
-EXTRACTED_JSON_HERE
-
-Return ONLY the corrected JSON. No explanations."""
 
 
 # ---------------------------------------------------------------------------
@@ -838,14 +813,14 @@ def _fix_location_consistency(parsed):
 
 
 # ---------------------------------------------------------------------------
-# Main parse function — two-pass for accuracy
+# Main parse function — single-pass extraction + post-processing
 # ---------------------------------------------------------------------------
 
 def parse_jd(jd_text, filename="unknown", model=None, api_key=None):
-    """Parse a job description using two-pass LLM extraction.
+    """Parse a job description using single-pass LLM extraction.
 
-    Pass 1: Extract all fields.
-    Pass 2: Validate and correct against original text.
+    Single LLM call with detailed prompt, followed by robust
+    normalization and post-processing in Python.
     """
     key = api_key or GROQ_API_KEY
     mdl = model or GROQ_MODEL
@@ -853,83 +828,47 @@ def parse_jd(jd_text, filename="unknown", model=None, api_key=None):
     if not key:
         return {"error": "GROQ_API_KEY not set."}
 
-    total_start = time.time()
-    total_usage = {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
-    finish_reason = "unknown"
+    start = time.time()
 
-    # --- Pass 1: Extraction ---
-    prompt1 = EXTRACTION_PROMPT.replace("JD_TEXT_HERE", jd_text)
+    # --- LLM Extraction ---
+    prompt = EXTRACTION_PROMPT.replace("JD_TEXT_HERE", jd_text)
     try:
-        content1, usage1, finish1 = _call_groq(
+        content, usage, finish_reason = _call_groq(
             [
                 {"role": "system", "content": SYSTEM_PROMPT},
-                {"role": "user", "content": prompt1},
+                {"role": "user", "content": prompt},
             ],
             model=mdl, api_key=key, temperature=0.1, max_tokens=8192,
         )
-        for k in total_usage:
-            total_usage[k] += usage1.get(k, 0)
-        finish_reason = finish1
     except Exception as e:
-        return {"error": f"Pass 1 failed: {str(e)}"}
+        return {"error": f"LLM extraction failed: {str(e)}"}
 
-    extracted = _extract_json(content1)
+    extracted = _extract_json(content)
     if extracted is None:
-        return {"error": "Failed to parse JSON from model response", "raw": content1[:500]}
+        return {"error": "Failed to parse JSON from model response", "raw": content[:500]}
 
-    # Normalize pass 1 output
+    # --- Normalize + Post-process ---
     extracted = _normalize_llm_output(extracted)
+    extracted, pp_applied = _post_process(extracted)
 
-    # --- Pass 2: Validation (with brief delay to avoid rate limit) ---
-    time.sleep(1)
-    extracted_str = json.dumps(extracted, indent=2, ensure_ascii=False)
-    prompt2 = VALIDATION_PROMPT.replace("JD_TEXT_HERE", jd_text).replace(
-        "EXTRACTED_JSON_HERE", extracted_str
-    )
-    try:
-        content2, usage2, finish2 = _call_groq(
-            [
-                {"role": "system", "content": SYSTEM_PROMPT},
-                {"role": "user", "content": prompt2},
-            ],
-            model=mdl, api_key=key, temperature=0.0, max_tokens=8192,
-        )
-        for k in total_usage:
-            total_usage[k] += usage2.get(k, 0)
-        finish_reason = finish2
-
-        validated = _extract_json(content2)
-        if validated is not None:
-            validated = _normalize_llm_output(validated)
-        else:
-            validated = extracted
-            finish_reason = "pass2_parse_failed"
-    except Exception:
-        validated = extracted
-        finish_reason = "pass2_failed"
-
-    # --- Post-processing ---
-    validated, pp_applied = _post_process(validated)
-
-    elapsed_ms = int((time.time() - total_start) * 1000)
+    elapsed_ms = int((time.time() - start) * 1000)
 
     metadata = {
         "parser": "groq_jd_parser",
         "model": mdl,
         "processing_time_ms": elapsed_ms,
         "finish_reason": finish_reason,
-        "prompt_tokens": total_usage["prompt_tokens"],
-        "completion_tokens": total_usage["completion_tokens"],
-        "total_tokens": total_usage["total_tokens"],
-        "passes": 2,
+        "prompt_tokens": usage.get("prompt_tokens", 0),
+        "completion_tokens": usage.get("completion_tokens", 0),
+        "total_tokens": usage.get("total_tokens", 0),
         "_post_processed": pp_applied,
     }
 
     # Set metadata fields that are derived, not extracted
-    validated["source_type"] = "file"
-    validated["language_detected"] = "en"
+    extracted["source_type"] = "file"
+    extracted["language_detected"] = "en"
 
-    return _build_output(jd_text, validated, filename, metadata)
+    return _build_output(jd_text, extracted, filename, metadata)
 
 
 # ---------------------------------------------------------------------------
