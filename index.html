@@ -3,320 +3,351 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>JD Parser — Groq + Llama 3.1</title>
+    <title>Groq JD Parser</title>
     <style>
-        * { box-sizing: border-box; margin: 0; padding: 0; }
-        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #0f172a; color: #e2e8f0; min-height: 100vh; }
-        .container { max-width: 1200px; margin: 0 auto; padding: 2rem; }
-        h1 { text-align: center; font-size: 1.8rem; margin-bottom: 0.5rem; color: #38bdf8; }
-        .subtitle { text-align: center; color: #94a3b8; margin-bottom: 2rem; font-size: 0.9rem; }
-        .badge { display: inline-block; background: #1e3a5f; color: #38bdf8; padding: 2px 8px; border-radius: 4px; font-size: 0.75rem; margin-left: 4px; }
-
-        /* Upload area */
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: -apple-system, 'Segoe UI', Roboto, sans-serif;
+            background: #0a0a0a; min-height: 100vh; color: #e0e0e0;
+        }
+        .container { max-width: 900px; margin: 60px auto; padding: 0 24px; }
+        h1 {
+            font-size: 2.2rem; font-weight: 700; text-align: center;
+            margin-bottom: 6px; letter-spacing: -0.02em; color: #fff;
+        }
+        .subtitle {
+            text-align: center; color: #888; margin-bottom: 40px;
+            font-size: 1rem;
+        }
+        .subtitle span { color: #3b82f6; font-weight: 600; }
         .upload-area {
-            border: 2px dashed #334155; border-radius: 12px; padding: 3rem; text-align: center;
-            cursor: pointer; transition: all 0.3s; background: #1e293b; margin-bottom: 1.5rem;
+            background: #151515; border: 2px dashed #333;
+            border-radius: 12px; padding: 48px 32px; text-align: center;
+            cursor: pointer; margin-bottom: 24px; transition: all 0.2s;
         }
-        .upload-area:hover, .upload-area.drag-over { border-color: #38bdf8; background: #1e3a5f; }
-        .upload-area h3 { margin-bottom: 0.5rem; color: #cbd5e1; }
-        .upload-area p { color: #64748b; font-size: 0.85rem; }
-        .upload-icon { font-size: 2.5rem; margin-bottom: 1rem; }
-        input[type="file"] { display: none; }
-
-        /* Text input */
-        .text-toggle { text-align: center; margin-bottom: 1rem; }
-        .text-toggle button {
-            background: #334155; color: #cbd5e1; border: none; padding: 0.5rem 1rem;
-            border-radius: 6px; cursor: pointer; font-size: 0.85rem;
+        .upload-area:hover { border-color: #3b82f6; }
+        .upload-area.dragover { border-color: #3b82f6; background: #101828; }
+        .upload-icon { font-size: 2.5rem; margin-bottom: 12px; }
+        .upload-text { font-size: 1.1rem; font-weight: 500; color: #ccc; }
+        .upload-sub { color: #666; font-size: 0.9rem; margin-top: 6px; }
+        #fileInput { display: none; }
+        .btn {
+            background: #3b82f6; color: #fff; border: none;
+            padding: 12px 28px; border-radius: 8px; font-size: 1rem;
+            font-weight: 600; cursor: pointer; margin-top: 16px;
+            transition: background 0.2s;
         }
-        .text-toggle button:hover { background: #475569; }
-        .text-input-area { display: none; margin-bottom: 1.5rem; }
-        .text-input-area textarea {
-            width: 100%; height: 200px; background: #1e293b; color: #e2e8f0; border: 1px solid #334155;
-            border-radius: 8px; padding: 1rem; font-family: monospace; font-size: 0.85rem; resize: vertical;
+        .btn:hover { background: #2563eb; }
+        .btn:disabled { background: #444; cursor: not-allowed; }
+        .loading { display: none; text-align: center; margin: 32px 0; }
+        .spinner {
+            width: 36px; height: 36px; border: 3px solid #333;
+            border-top-color: #3b82f6; border-radius: 50%;
+            animation: spin 0.8s linear infinite; margin: 0 auto 12px;
         }
-        .text-input-area button {
-            margin-top: 0.5rem; background: #38bdf8; color: #0f172a; border: none;
-            padding: 0.6rem 1.5rem; border-radius: 6px; cursor: pointer; font-weight: 600;
-        }
-
-        /* Status */
-        .status { text-align: center; padding: 1rem; display: none; }
-        .status.loading { display: block; color: #38bdf8; }
-        .spinner { display: inline-block; width: 20px; height: 20px; border: 2px solid #38bdf8; border-top-color: transparent; border-radius: 50%; animation: spin 0.8s linear infinite; margin-right: 8px; vertical-align: middle; }
         @keyframes spin { to { transform: rotate(360deg); } }
-
-        /* Results */
-        .results { display: none; }
-        .result-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem; }
-        .result-header h2 { color: #38bdf8; font-size: 1.3rem; }
-        .confidence-badge {
-            padding: 4px 12px; border-radius: 20px; font-size: 0.85rem; font-weight: 600;
+        .result { display: none; margin-top: 32px; }
+        .result-header {
+            display: flex; justify-content: space-between; align-items: center;
+            margin-bottom: 20px;
         }
-        .conf-high { background: #166534; color: #4ade80; }
-        .conf-medium { background: #854d0e; color: #facc15; }
-        .conf-low { background: #991b1b; color: #fca5a5; }
-
-        .meta-bar { display: flex; gap: 1rem; flex-wrap: wrap; margin-bottom: 1.5rem; }
-        .meta-item { background: #1e293b; padding: 0.5rem 1rem; border-radius: 6px; font-size: 0.8rem; }
-        .meta-label { color: #64748b; }
-        .meta-value { color: #e2e8f0; font-weight: 600; }
-
-        /* Field cards */
-        .field-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(350px, 1fr)); gap: 1rem; }
-        .field-card {
-            background: #1e293b; border-radius: 8px; padding: 1rem; border-left: 3px solid #334155;
+        .result-header h2 { font-size: 1.3rem; color: #fff; }
+        .meta { color: #888; font-size: 0.85rem; }
+        .meta span { color: #3b82f6; font-weight: 600; }
+        .section {
+            background: #151515; border-radius: 10px; padding: 20px;
+            margin-bottom: 16px; border: 1px solid #222;
         }
-        .field-card.has-value { border-left-color: #38bdf8; }
-        .field-card.null-field { opacity: 0.5; }
-        .field-name { color: #94a3b8; font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 0.3rem; }
-        .field-value { color: #e2e8f0; font-size: 0.9rem; word-break: break-word; }
-        .field-value .null { color: #475569; font-style: italic; }
-        .field-conf { float: right; font-size: 0.7rem; padding: 1px 6px; border-radius: 3px; }
-
-        /* Lists */
-        .field-list { list-style: none; padding: 0; }
-        .field-list li { padding: 0.3rem 0; border-bottom: 1px solid #334155; font-size: 0.85rem; }
-        .field-list li:last-child { border-bottom: none; }
-
-        /* Skills */
-        .skill-tags { display: flex; flex-wrap: wrap; gap: 0.4rem; }
-        .skill-tag { background: #334155; padding: 2px 8px; border-radius: 4px; font-size: 0.8rem; }
-        .skill-cat { color: #64748b; font-size: 0.65rem; }
-
-        /* JSON view */
-        .json-toggle { text-align: center; margin-top: 1.5rem; }
-        .json-toggle button { background: #334155; color: #cbd5e1; border: none; padding: 0.5rem 1rem; border-radius: 6px; cursor: pointer; }
-        .json-view { display: none; margin-top: 1rem; background: #1e293b; border-radius: 8px; padding: 1rem; overflow-x: auto; }
-        .json-view pre { color: #a5f3fc; font-size: 0.8rem; white-space: pre-wrap; }
-
-        .copy-btn { background: #475569; color: #e2e8f0; border: none; padding: 0.4rem 0.8rem; border-radius: 4px; cursor: pointer; font-size: 0.8rem; }
-        .copy-btn:hover { background: #64748b; }
+        .section h3 {
+            font-size: 0.85rem; text-transform: uppercase; letter-spacing: 0.08em;
+            color: #3b82f6; margin-bottom: 12px;
+        }
+        .field { margin-bottom: 8px; }
+        .field-label { color: #888; font-size: 0.85rem; }
+        .field-value { color: #e0e0e0; font-size: 0.95rem; margin-top: 2px; }
+        .tag {
+            display: inline-block; background: #1e1e1e; color: #ccc;
+            padding: 4px 10px; border-radius: 6px; font-size: 0.82rem;
+            margin: 3px 4px 3px 0; border: 1px solid #333;
+        }
+        .tag.primary { border-color: #3b82f6; color: #3b82f6; }
+        .tag .cat { color: #555; font-size: 0.72rem; margin-left: 4px; }
+        .list-item { margin-bottom: 6px; padding-left: 12px; color: #aaa; font-size: 0.9rem; position: relative; }
+        .list-item::before { content: "●"; position: absolute; left: 0; color: #3b82f6; font-size: 0.5rem; top: 5px; }
+        .json-toggle {
+            background: none; border: 1px solid #333; color: #888;
+            padding: 6px 14px; border-radius: 6px; cursor: pointer;
+            font-size: 0.85rem;
+        }
+        .json-toggle:hover { border-color: #3b82f6; color: #3b82f6; }
+        .json-view {
+            display: none; background: #0d0d0d; border-radius: 8px;
+            padding: 16px; overflow-x: auto; font-family: 'SF Mono', monospace;
+            font-size: 0.82rem; color: #aaa; margin-top: 16px;
+            border: 1px solid #222; max-height: 500px; overflow-y: auto;
+        }
+        .error {
+            background: #1a1018; border: 1px solid #f55036; border-radius: 10px;
+            padding: 16px; color: #f55036; display: none; margin-top: 20px;
+        }
     </style>
 </head>
 <body>
     <div class="container">
-        <h1>JD Parser <span class="badge">Groq + Llama 3.1</span> <span class="badge">2-Pass</span></h1>
-        <p class="subtitle">Upload a job description to extract structured data with confidence scoring</p>
+        <h1>JD Parser</h1>
+        <p class="subtitle">Powered by <span>Groq + Llama 3.1</span></p>
 
-        <div class="upload-area" id="uploadArea">
-            <div class="upload-icon">&#128196;</div>
-            <h3>Drop JD file here or click to upload</h3>
-            <p>PDF, DOCX, DOC, TXT — max 10MB</p>
+        <div class="upload-area" id="dropZone" onclick="document.getElementById('fileInput').click()">
+            <div class="upload-icon">+</div>
+            <div class="upload-text">Drop JD file here or click to upload</div>
+            <div class="upload-sub">PDF, DOC, DOCX, TXT (max 10MB)</div>
             <input type="file" id="fileInput" accept=".pdf,.doc,.docx,.txt,.html">
         </div>
 
-        <div class="text-toggle">
-            <button onclick="toggleTextInput()">Or paste JD text directly</button>
+        <div style="text-align:center">
+            <button class="btn" id="parseBtn" disabled onclick="parseJD()">Parse JD</button>
         </div>
 
-        <div class="text-input-area" id="textArea">
-            <textarea id="jdText" placeholder="Paste job description text here..."></textarea>
-            <button onclick="parseText()">Parse JD Text</button>
+        <div class="loading" id="loading">
+            <div class="spinner"></div>
+            <div style="color:#888">Parsing with Llama 3.1...</div>
         </div>
 
-        <div class="status" id="status">
-            <span class="spinner"></span>
-            <span id="statusText">Parsing job description (2-pass)...</span>
-        </div>
+        <div class="error" id="error"></div>
 
-        <div class="results" id="results"></div>
+        <div class="result" id="result">
+            <div class="result-header">
+                <h2 id="resultFilename">Results</h2>
+                <div>
+                    <span class="meta"><span id="resultTime">0</span>ms</span>
+                    <button class="json-toggle" onclick="toggleJson()">JSON</button>
+                </div>
+            </div>
+            <div id="sections"></div>
+            <div class="json-view" id="jsonView"><pre id="jsonContent"></pre></div>
+        </div>
     </div>
 
     <script>
-        const uploadArea = document.getElementById('uploadArea');
-        const fileInput = document.getElementById('fileInput');
-        const status = document.getElementById('status');
-        const statusText = document.getElementById('statusText');
-        const results = document.getElementById('results');
+        let selectedFile = null;
 
-        uploadArea.addEventListener('click', () => fileInput.click());
-        uploadArea.addEventListener('dragover', e => { e.preventDefault(); uploadArea.classList.add('drag-over'); });
-        uploadArea.addEventListener('dragleave', () => uploadArea.classList.remove('drag-over'));
-        uploadArea.addEventListener('drop', e => {
-            e.preventDefault();
-            uploadArea.classList.remove('drag-over');
-            if (e.dataTransfer.files.length) parseFile(e.dataTransfer.files[0]);
+        const drop = document.getElementById('dropZone');
+        const input = document.getElementById('fileInput');
+        const btn = document.getElementById('parseBtn');
+
+        drop.addEventListener('dragover', e => { e.preventDefault(); drop.classList.add('dragover'); });
+        drop.addEventListener('dragleave', () => drop.classList.remove('dragover'));
+        drop.addEventListener('drop', e => {
+            e.preventDefault(); drop.classList.remove('dragover');
+            if (e.dataTransfer.files.length) { selectedFile = e.dataTransfer.files[0]; onFileSelected(); }
         });
-        fileInput.addEventListener('change', () => { if (fileInput.files.length) parseFile(fileInput.files[0]); });
+        input.addEventListener('change', () => { selectedFile = input.files[0]; onFileSelected(); });
 
-        function toggleTextInput() {
-            const ta = document.getElementById('textArea');
-            ta.style.display = ta.style.display === 'none' ? 'block' : 'block';
-            if (ta.style.display === 'block') document.getElementById('jdText').focus();
+        function onFileSelected() {
+            if (selectedFile) {
+                drop.querySelector('.upload-text').textContent = selectedFile.name;
+                btn.disabled = false;
+            }
         }
 
-        async function parseFile(file) {
-            showLoading(`Parsing "${file.name}" (2-pass for accuracy)...`);
+        async function parseJD() {
+            if (!selectedFile) return;
+            const loading = document.getElementById('loading');
+            const result = document.getElementById('result');
+            const error = document.getElementById('error');
+
+            loading.style.display = 'block';
+            result.style.display = 'none';
+            error.style.display = 'none';
+            btn.disabled = true;
+
             const form = new FormData();
-            form.append('file', file);
+            form.append('file', selectedFile);
+
             try {
                 const resp = await fetch('/parse', { method: 'POST', body: form });
                 const data = await resp.json();
                 if (data.error) { showError(data.error); return; }
-                renderResult(data.result || data);
-            } catch (e) { showError(e.message); }
+                renderResult(data);
+            } catch (e) {
+                showError('Network error: ' + e.message);
+            } finally {
+                loading.style.display = 'none';
+                btn.disabled = false;
+            }
         }
 
-        async function parseText() {
-            const text = document.getElementById('jdText').value.trim();
-            if (!text) return;
-            showLoading('Parsing JD text (2-pass for accuracy)...');
-            try {
-                const resp = await fetch('/parse/text', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ text })
-                });
-                const data = await resp.json();
-                if (data.error) { showError(data.error); return; }
-                renderResult(data.result || data);
-            } catch (e) { showError(e.message); }
-        }
-
-        function showLoading(msg) {
-            status.className = 'status loading';
-            statusText.textContent = msg;
-            results.style.display = 'none';
-        }
         function showError(msg) {
-            status.className = 'status';
-            status.style.display = 'block';
-            status.innerHTML = `<span style="color:#f87171">Error: ${msg}</span>`;
+            const error = document.getElementById('error');
+            error.textContent = msg;
+            error.style.display = 'block';
         }
 
         function renderResult(data) {
-            status.style.display = 'none';
-            results.style.display = 'block';
+            const r = data.result || data;
+            const f = r.fields || {};
+            const meta = r._metadata || {};
 
-            const gc = data.global_confidence || 0;
-            const confClass = gc >= 0.9 ? 'conf-high' : gc >= 0.75 ? 'conf-medium' : 'conf-low';
-            const meta = data._metadata || {};
-            const fields = data.fields || {};
+            document.getElementById('resultFilename').textContent = data.filename || 'Results';
+            document.getElementById('resultTime').textContent = meta.processing_time_ms || data.processing_time_ms || 0;
+            document.getElementById('jsonContent').textContent = JSON.stringify(r, null, 2);
 
-            let html = `
-                <div class="result-header">
-                    <h2>${getFieldText(fields.title) || 'Job Description'}</h2>
-                    <span class="confidence-badge ${confClass}">${(gc * 100).toFixed(1)}% confidence</span>
-                </div>
-                <div class="meta-bar">
-                    <div class="meta-item"><span class="meta-label">Model: </span><span class="meta-value">${meta.model || 'N/A'}</span></div>
-                    <div class="meta-item"><span class="meta-label">Time: </span><span class="meta-value">${meta.processing_time_ms || 0}ms</span></div>
-                    <div class="meta-item"><span class="meta-label">Tokens: </span><span class="meta-value">${meta.total_tokens || 0}</span></div>
-                    <div class="meta-item"><span class="meta-label">Passes: </span><span class="meta-value">${meta.passes || 1}</span></div>
-                    <div class="meta-item"><span class="meta-label">Language: </span><span class="meta-value">${data.detected_language || 'en'}</span></div>
-                </div>
-                <div class="field-grid">
-            `;
+            const s = document.getElementById('sections');
+            s.innerHTML = '';
 
-            const fieldOrder = [
-                'title', 'company', 'location', 'employment_type', 'work_mode',
-                'salary', 'experience_years', 'job_summary', 'responsibilities',
-                'requirements', 'skills', 'education', 'certifications', 'benefits',
-                'job_domain', 'reporting_to', 'team_size', 'travel_requirement',
-                'job_posted_date', 'job_expiry_date', 'application_link',
-                'company_website', 'industry', 'company_size', 'company_overview',
-                'preferred_experience', 'preferred_technologies',
-                'work_authorization', 'job_id', 'equal_opportunity_statement'
-            ];
+            // Job Information
+            s.innerHTML += sec('Job Information', [
+                fld('Job Title', val(f.title, 'text') || val(f.title)),
+                fld('Seniority', val(f.title, 'seniority_level')),
+                fld('Domain', val(f.title, 'domain')),
+                fld('Job ID', val(f.job_id)),
+                fld('Employment Type', arrJoin(f.employment_type)),
+                fld('Work Mode', val(f.work_mode)),
+                fld('Location', val(f.location, 'formatted_address') || val(f.location)),
+                fld('Posted', val(f.job_posted_date)),
+                fld('Expires', val(f.job_expiry_date)),
+            ].join(''));
 
-            for (const fname of fieldOrder) {
-                const field = fields[fname];
-                html += renderField(fname, field);
+            // Company
+            if (val(f.company) || val(f.company_overview)) {
+                s.innerHTML += sec('Company', [
+                    fld('Company', val(f.company)),
+                    fld('Industry', val(f.industry)),
+                    fld('Website', val(f.company_website)),
+                    fld('Size', val(f.company_size)),
+                    val(f.company_overview) ? '<div class="field" style="margin-top:8px"><span class="field-label">Overview:</span><div class="field-value">' + esc(val(f.company_overview)) + '</div></div>' : '',
+                ].join(''));
             }
 
-            html += '</div>';
-
-            // JSON toggle
-            html += `
-                <div class="json-toggle">
-                    <button onclick="toggleJson()">View Raw JSON</button>
-                    <button class="copy-btn" onclick="copyJson()">Copy JSON</button>
-                </div>
-                <div class="json-view" id="jsonView">
-                    <pre id="jsonPre">${escHtml(JSON.stringify(data, null, 2))}</pre>
-                </div>
-            `;
-
-            results.innerHTML = html;
-        }
-
-        function getFieldText(field) {
-            if (!field || !field.value) return null;
-            if (typeof field.value === 'string') return field.value;
-            if (field.value.text) return field.value.text;
-            if (field.value.formatted_address) return field.value.formatted_address;
-            return JSON.stringify(field.value);
-        }
-
-        function renderField(name, field) {
-            const isNull = !field || field.value === null || field.value === undefined;
-            const cls = isNull ? 'field-card null-field' : 'field-card has-value';
-            const label = name.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
-
-            let confBadge = '';
-            if (field && field.confidence !== undefined) {
-                const c = field.confidence;
-                const cc = c >= 0.9 ? 'conf-high' : c >= 0.75 ? 'conf-medium' : 'conf-low';
-                confBadge = `<span class="field-conf ${cc}">${(c * 100).toFixed(0)}%</span>`;
+            // Summary
+            if (val(f.job_summary)) {
+                s.innerHTML += sec('Job Summary', '<div class="field-value">' + esc(val(f.job_summary)) + '</div>');
             }
 
-            let valueHtml = '<span class="null">null</span>';
-            if (!isNull) {
-                valueHtml = renderValue(name, field.value);
+            // Responsibilities
+            const resps = valArr(f.responsibilities);
+            if (resps.length) {
+                s.innerHTML += sec('Responsibilities (' + resps.length + ')', resps.map(r =>
+                    '<div class="list-item">' + esc(r) + '</div>'
+                ).join(''));
             }
 
-            return `<div class="${cls}"><div class="field-name">${label} ${confBadge}</div><div class="field-value">${valueHtml}</div></div>`;
-        }
-
-        function renderValue(name, value) {
-            if (value === null || value === undefined) return '<span class="null">null</span>';
-
-            // Arrays
-            if (Array.isArray(value)) {
-                if (value.length === 0) return '<span class="null">[]</span>';
-                // Skills array
-                if (name === 'skills' && value[0] && value[0].name) {
-                    return '<div class="skill-tags">' + value.map(s =>
-                        `<span class="skill-tag">${escHtml(s.name)} <span class="skill-cat">${s.category || ''}</span></span>`
-                    ).join('') + '</div>';
-                }
-                // String arrays
-                return '<ul class="field-list">' + value.map(v =>
-                    `<li>${escHtml(typeof v === 'string' ? v : JSON.stringify(v))}</li>`
-                ).join('') + '</ul>';
+            // Requirements
+            const reqs = valArr(f.requirements);
+            if (reqs.length) {
+                s.innerHTML += sec('Requirements (' + reqs.length + ')', reqs.map(r =>
+                    '<div class="list-item">' + esc(r) + '</div>'
+                ).join(''));
             }
 
-            // Objects
-            if (typeof value === 'object') {
-                if (name === 'title') return `<strong>${escHtml(value.text || '')}</strong>${value.seniority_level ? ' (' + escHtml(value.seniority_level) + ')' : ''}${value.domain ? ' — ' + escHtml(value.domain) : ''}`;
-                if (name === 'location') return escHtml(value.formatted_address || '') + (value.remote ? ` (${value.remote})` : '');
-                if (name === 'salary') {
+            // Skills
+            const skills = valArr(f.skills);
+            if (skills.length) {
+                s.innerHTML += sec('Skills (' + skills.length + ')',
+                    skills.map(sk => {
+                        if (typeof sk === 'object')
+                            return '<span class="tag">' + esc(sk.name) + '<span class="cat">' + (sk.category || '').replace('_', ' ') + '</span></span>';
+                        return '<span class="tag">' + esc(sk) + '</span>';
+                    }).join('')
+                );
+            }
+
+            // Education & Experience
+            const edu = val(f.education);
+            const exp = val(f.experience_years);
+            if (edu || exp) {
+                s.innerHTML += sec('Qualifications', [
+                    edu ? fld('Education', (edu.level || '') + (edu.field ? ' in ' + edu.field : '')) : '',
+                    exp ? fld('Experience', exp.min_years + '–' + exp.max_years + ' years (' + (exp.requirement_type || 'required') + ')') : '',
+                ].join(''));
+            }
+
+            // Certifications
+            const certs = valArr(f.certifications);
+            if (certs.length) {
+                s.innerHTML += sec('Certifications', certs.map(c =>
+                    '<span class="tag primary">' + esc(typeof c === 'string' ? c : c.name || JSON.stringify(c)) + '</span>'
+                ).join(''));
+            }
+
+            // Preferred
+            const prefExp = valArr(f.preferred_experience);
+            const prefTech = valArr(f.preferred_technologies);
+            if (prefExp.length || prefTech.length) {
+                let html = '';
+                if (prefExp.length) html += '<div style="margin-bottom:8px"><span class="field-label">Experience:</span><br>' + prefExp.map(p => '<div class="list-item">' + esc(p) + '</div>').join('') + '</div>';
+                if (prefTech.length) html += '<div><span class="field-label">Technologies:</span><br>' + prefTech.map(t => '<span class="tag">' + esc(t) + '</span>').join('') + '</div>';
+                s.innerHTML += sec('Preferred', html);
+            }
+
+            // Compensation & Benefits
+            const salary = val(f.salary);
+            const benefits = valArr(f.benefits);
+            if (salary || benefits.length) {
+                let html = '';
+                if (salary) {
                     const fmt = v => typeof v === 'number' ? v.toLocaleString() : v;
-                    return `${value.currency || ''} ${fmt(value.min)}–${fmt(value.max)} / ${value.period || 'year'}`;
+                    html += fld('Salary', (salary.currency || '') + ' ' + fmt(salary.min) + ' – ' + fmt(salary.max) + ' / ' + (salary.period || 'year'));
                 }
-                if (name === 'experience_years') return `${value.min_years}–${value.max_years} years (${value.requirement_type || 'required'})`;
-                if (name === 'education') return `${value.level || ''} in ${value.field || ''}`;
-                return escHtml(JSON.stringify(value));
+                if (benefits.length) {
+                    html += '<div class="field" style="margin-top:8px"><span class="field-label">Benefits:</span><br>' + benefits.map(b => '<span class="tag">' + esc(b) + '</span>').join('') + '</div>';
+                }
+                s.innerHTML += sec('Compensation & Benefits', html);
             }
 
-            return escHtml(String(value));
+            // Additional Info
+            const extras = [
+                fld('Reporting To', val(f.reporting_to)),
+                fld('Team Size', val(f.team_size)),
+                fld('Travel', val(f.travel_requirement)),
+                fld('Apply', val(f.application_link)),
+            ].join('');
+            if (extras.trim()) {
+                s.innerHTML += sec('Additional Info', extras);
+            }
+
+            // EEO
+            if (val(f.equal_opportunity_statement)) {
+                s.innerHTML += sec('Equal Opportunity', '<div class="field-value" style="color:#888;font-size:0.88rem">' + esc(val(f.equal_opportunity_statement)) + '</div>');
+            }
+
+            document.getElementById('result').style.display = 'block';
         }
 
-        function escHtml(s) { const d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
-
+        // Helpers
+        function sec(title, content) {
+            return '<div class="section"><h3>' + title + '</h3>' + content + '</div>';
+        }
+        function fld(label, value) {
+            if (!value) return '';
+            return '<div class="field"><span class="field-label">' + label + ':</span> <span class="field-value">' + esc(String(value)) + '</span></div>';
+        }
+        function val(field, key) {
+            if (!field || typeof field !== 'object' || !field.value) return null;
+            if (key) return field.value && typeof field.value === 'object' ? field.value[key] : null;
+            return field.value;
+        }
+        function valArr(field) {
+            if (!field || typeof field !== 'object' || !Array.isArray(field.value)) return [];
+            return field.value;
+        }
+        function arrJoin(field) {
+            const arr = valArr(field);
+            if (!arr.length) {
+                const v = val(field);
+                return typeof v === 'string' ? v : null;
+            }
+            return arr.join(', ');
+        }
+        function esc(s) {
+            if (!s) return '';
+            const d = document.createElement('div');
+            d.textContent = String(s);
+            return d.innerHTML;
+        }
         function toggleJson() {
-            const jv = document.getElementById('jsonView');
-            jv.style.display = jv.style.display === 'none' ? 'block' : 'none';
-        }
-
-        function copyJson() {
-            const pre = document.getElementById('jsonPre');
-            navigator.clipboard.writeText(pre.textContent).then(() => {
-                const btn = document.querySelector('.copy-btn');
-                btn.textContent = 'Copied!';
-                setTimeout(() => btn.textContent = 'Copy JSON', 2000);
-            });
+            const v = document.getElementById('jsonView');
+            v.style.display = v.style.display === 'none' ? 'block' : 'none';
         }
     </script>
 </body>
