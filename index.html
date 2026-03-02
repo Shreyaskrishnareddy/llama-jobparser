@@ -224,6 +224,11 @@
                 s.innerHTML += sec('Job Summary', '<div class="field-value">' + esc(val(f.job_summary)) + '</div>');
             }
 
+            // Description
+            if (val(f.description)) {
+                s.innerHTML += sec('Description', '<div class="field-value">' + esc(val(f.description)) + '</div>');
+            }
+
             // Responsibilities
             const resps = valArr(f.responsibilities);
             if (resps.length) {
@@ -240,10 +245,26 @@
                 ).join(''));
             }
 
-            // Skills
+            // Technical Skills
+            const techSkills = valArr(f.technical_skills);
+            if (techSkills.length) {
+                s.innerHTML += sec('Technical Skills (' + techSkills.length + ')',
+                    techSkills.map(sk => '<span class="tag primary">' + esc(sk) + '</span>').join('')
+                );
+            }
+
+            // Soft Skills
+            const softSkills = valArr(f.soft_skills);
+            if (softSkills.length) {
+                s.innerHTML += sec('Soft Skills (' + softSkills.length + ')',
+                    softSkills.map(sk => '<span class="tag">' + esc(sk) + '</span>').join('')
+                );
+            }
+
+            // All Skills (detailed)
             const skills = valArr(f.skills);
             if (skills.length) {
-                s.innerHTML += sec('Skills (' + skills.length + ')',
+                s.innerHTML += sec('All Skills (' + skills.length + ')',
                     skills.map(sk => {
                         if (typeof sk === 'object')
                             return '<span class="tag">' + esc(sk.name) + '<span class="cat">' + (sk.category || '').replace('_', ' ') + '</span></span>';

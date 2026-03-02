@@ -59,6 +59,10 @@ FIELD-BY-FIELD INSTRUCTIONS:
    Categories: "programming_language", "framework", "database", "cloud", "devops", "tool", "methodology", "domain", "soft_skill", "networking", "os", "other"
    Extract ALL skills from everywhere in the JD. Do NOT include "source" or any extra keys.
 
+8b. technical_skills — Array of PLAIN STRINGS of technical/hard skills only (e.g., ["SQL", "Power BI", "Excel", "Python"]). Extract from the skills list above, including only those with categories: programming_language, framework, database, cloud, devops, tool, networking, os.
+
+8c. soft_skills — Array of PLAIN STRINGS of soft/interpersonal skills only (e.g., ["Communication", "Leadership", "Problem Solving"]). Extract from the skills list above, including only those with category: soft_skill.
+
 9. education — Object or null: {"level": "Bachelor's"|"Master's"|"PhD"|etc, "field": "field of study"}
 
 10. experience_years — Object or null: {"min_years": number, "max_years": number, "requirement_type": "required"|"preferred"}
@@ -69,9 +73,11 @@ FIELD-BY-FIELD INSTRUCTIONS:
 
 13. job_domain — String like "Information Technology", "Healthcare", etc. Infer from context if clear.
 
-14. job_summary — The job summary/description paragraph text. Extract the actual summary text from the JD.
+14. job_summary — The brief job summary paragraph (usually 1-3 sentences at the top describing the role). This is the SHORT overview.
 
-15. job_id — String or null.
+15. description — The FULL detailed job description text. This is the longer, more detailed paragraph(s) that describe the role in depth, including the full "Job Description" or "About the Role" section. If there is no separate detailed description beyond the summary, set to null.
+
+16. job_id — String or null.
 
 16. work_mode — One of: "remote", "hybrid", "onsite". Default "onsite" if not stated.
 
@@ -117,12 +123,15 @@ CRITICAL:
   "requirements": [],
   "responsibilities": [],
   "skills": [{"name": "", "category": ""}],
+  "technical_skills": [],
+  "soft_skills": [],
   "education": null,
   "experience_years": null,
   "benefits": [],
   "work_authorization": null,
   "job_domain": null,
   "job_summary": null,
+  "description": null,
   "job_id": null,
   "work_mode": "onsite",
   "job_posted_date": null,
@@ -370,7 +379,8 @@ def _normalize_llm_output(parsed):
 
     # Fix string list fields: if items are objects, extract the text
     for list_field in ("requirements", "responsibilities", "benefits",
-                       "preferred_experience", "preferred_technologies", "certifications"):
+                       "preferred_experience", "preferred_technologies", "certifications",
+                       "technical_skills", "soft_skills"):
         items = parsed.get(list_field)
         if isinstance(items, list):
             cleaned = []
@@ -567,12 +577,13 @@ def _build_provenance(original_text, field_name, value, extractor_name):
 _BASE_CONFIDENCE = {
     "title": 0.95, "company": 0.95, "location": 0.90,
     "employment_type": 0.95, "salary": 0.80, "requirements": 0.90,
-    "responsibilities": 0.95, "skills": 0.90, "education": 0.90,
-    "experience_years": 0.95, "benefits": 0.85, "work_authorization": 0.85,
-    "job_domain": 0.85, "job_summary": 0.95, "job_id": 0.95,
+    "responsibilities": 0.95, "skills": 0.90, "technical_skills": 0.90,
+    "soft_skills": 0.90, "education": 0.90, "experience_years": 0.95,
+    "benefits": 0.85, "work_authorization": 0.85, "job_domain": 0.85,
+    "job_summary": 0.95, "description": 0.95, "job_id": 0.95,
     "work_mode": 0.90, "job_posted_date": 0.95, "job_expiry_date": 0.95,
     "reporting_to": 0.95, "team_size": 0.95, "travel_requirement": 0.95,
-    "application_link": 0.95,
+    "application_link": 0.95, "source_type": 0.95, "language_detected": 0.95,
 }
 
 _EXTRACTOR_NAMES = {
@@ -580,13 +591,16 @@ _EXTRACTOR_NAMES = {
     "location": "location_extractor", "employment_type": "employment_type_extractor",
     "salary": "salary_extractor", "requirements": "sectionizer",
     "responsibilities": "sectionizer", "skills": "skills_extractor",
+    "technical_skills": "skills_extractor", "soft_skills": "skills_extractor",
     "education": "education_extractor", "experience_years": "experience_extractor",
     "benefits": "benefits_extractor", "work_authorization": "metadata_extractor",
     "job_domain": "domain_extractor", "job_summary": "sectionizer",
-    "job_id": "metadata_extractor", "work_mode": "location_extractor",
-    "job_posted_date": "date_extractor", "job_expiry_date": "date_extractor",
-    "reporting_to": "metadata_extractor", "team_size": "metadata_extractor",
-    "travel_requirement": "metadata_extractor", "application_link": "metadata_extractor",
+    "description": "sectionizer", "job_id": "metadata_extractor",
+    "work_mode": "location_extractor", "job_posted_date": "date_extractor",
+    "job_expiry_date": "date_extractor", "reporting_to": "metadata_extractor",
+    "team_size": "metadata_extractor", "travel_requirement": "metadata_extractor",
+    "application_link": "metadata_extractor", "source_type": "metadata_extractor",
+    "language_detected": "metadata_extractor",
 }
 
 
@@ -610,13 +624,15 @@ def _field_status(confidence):
 
 _ALL_FIELDS = [
     "title", "company", "location", "employment_type", "salary",
-    "requirements", "responsibilities", "skills", "education",
-    "experience_years", "benefits", "work_authorization", "job_domain",
-    "job_summary", "job_id", "work_mode", "job_posted_date", "job_expiry_date",
+    "requirements", "responsibilities", "skills", "technical_skills",
+    "soft_skills", "education", "experience_years", "benefits",
+    "work_authorization", "job_domain", "job_summary", "description",
+    "job_id", "work_mode", "job_posted_date", "job_expiry_date",
     "reporting_to", "team_size", "travel_requirement", "application_link",
     "equal_opportunity_statement", "company_website", "industry",
     "company_size", "company_overview", "preferred_experience",
     "preferred_technologies", "certifications",
+    "source_type", "language_detected",
 ]
 
 
@@ -705,7 +721,37 @@ def _post_process(parsed):
     except Exception:
         pass
 
+    try:
+        _fix_derive_skill_splits(parsed)
+        applied.append("derive_skill_splits")
+    except Exception:
+        pass
+
     return parsed, applied
+
+
+def _fix_derive_skill_splits(parsed):
+    """Derive technical_skills and soft_skills from skills if not already set."""
+    skills = parsed.get("skills")
+    if not isinstance(skills, list):
+        return
+
+    tech_categories = {
+        "programming_language", "framework", "database", "cloud",
+        "devops", "tool", "networking", "os", "other", "methodology", "domain",
+    }
+
+    # Only derive if not already populated
+    if not parsed.get("technical_skills"):
+        parsed["technical_skills"] = [
+            s["name"] for s in skills
+            if isinstance(s, dict) and s.get("category") in tech_categories
+        ]
+    if not parsed.get("soft_skills"):
+        parsed["soft_skills"] = [
+            s["name"] for s in skills
+            if isinstance(s, dict) and s.get("category") == "soft_skill"
+        ]
 
 
 def _fix_employment_type(parsed):
@@ -862,6 +908,10 @@ def parse_jd(jd_text, filename="unknown", model=None, api_key=None):
         "passes": 2,
         "_post_processed": pp_applied,
     }
+
+    # Set metadata fields that are derived, not extracted
+    validated["source_type"] = "file"
+    validated["language_detected"] = "en"
 
     return _build_output(jd_text, validated, filename, metadata)
 
