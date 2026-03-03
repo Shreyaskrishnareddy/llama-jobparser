@@ -147,15 +147,15 @@ CRITICAL — MUST FOLLOW:
   "company_overview": null,
   "equal_opportunity_statement": null,
   "certifications": [],
-  "skills": [{"name": "", "category": ""}],
-  "technical_skills": [],
-  "soft_skills": [],
+  "requirements": [],
+  "responsibilities": [],
+  "description": null,
   "preferred_experience": [],
   "preferred_technologies": [],
   "benefits": [],
-  "requirements": [],
-  "responsibilities": [],
-  "description": null
+  "skills": [{"name": "", "category": ""}],
+  "technical_skills": [],
+  "soft_skills": []
 }
 
 JOB DESCRIPTION:
@@ -272,26 +272,29 @@ def _extract_image_ocr(filepath):
 # LLM API call
 # ---------------------------------------------------------------------------
 
-def _call_groq(messages, model=None, api_key=None, temperature=0.1, max_tokens=16384):
+def _call_groq(messages, model=None, api_key=None, temperature=0.1, max_tokens=32768, frequency_penalty=0.0):
     key = api_key or GROQ_API_KEY
     mdl = model or GROQ_MODEL
 
     max_retries = 5
     for attempt in range(max_retries):
+        payload = {
+            "model": mdl,
+            "messages": messages,
+            "temperature": temperature,
+            "top_p": 0.9,
+            "max_tokens": max_tokens,
+            "response_format": {"type": "json_object"},
+        }
+        if frequency_penalty > 0:
+            payload["frequency_penalty"] = frequency_penalty
         resp = requests.post(
             GROQ_URL,
             headers={
                 "Authorization": f"Bearer {key}",
                 "Content-Type": "application/json",
             },
-            json={
-                "model": mdl,
-                "messages": messages,
-                "temperature": temperature,
-                "top_p": 0.9,
-                "max_tokens": max_tokens,
-                "response_format": {"type": "json_object"},
-            },
+            json=payload,
             timeout=120,
         )
         if resp.status_code == 429:
@@ -1177,10 +1180,29 @@ def parse_jd(jd_text, filename="unknown", model=None, api_key=None):
                 {"role": "system", "content": SYSTEM_PROMPT},
                 {"role": "user", "content": prompt},
             ],
-            model=mdl, api_key=key, temperature=0.1, max_tokens=16384,
+            model=mdl, api_key=key, temperature=0.1, max_tokens=32768,
         )
     except Exception as e:
         return {"error": f"LLM extraction failed: {str(e)}"}
+
+    # If output was truncated (model stuck in repetition loop), retry with
+    # temperature=0 and frequency_penalty to break the loop.
+    if finish_reason == "length":
+        concise_note = (
+            "\n\nIMPORTANT: Be CONCISE. For the skills array, list each skill ONCE "
+            "with its single best category. Maximum 30 skills. Do NOT repeat any skill."
+        )
+        try:
+            content, usage, finish_reason = _call_groq(
+                [
+                    {"role": "system", "content": SYSTEM_PROMPT},
+                    {"role": "user", "content": prompt + concise_note},
+                ],
+                model=mdl, api_key=key, temperature=0.0, max_tokens=32768,
+                frequency_penalty=0.5,
+            )
+        except Exception:
+            pass  # Fall through to parse whatever we got from the first attempt
 
     extracted = _extract_json(content)
     if extracted is None:
