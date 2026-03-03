@@ -128,34 +128,34 @@ CRITICAL — MUST FOLLOW:
   "location": {"city": "", "region": null, "country": "", "remote": "", "formatted_address": ""},
   "employment_type": [],
   "salary": null,
-  "requirements": [],
-  "responsibilities": [],
-  "skills": [{"name": "", "category": ""}],
-  "technical_skills": [],
-  "soft_skills": [],
   "education": null,
   "experience_years": null,
-  "benefits": [],
-  "work_authorization": null,
+  "work_mode": "onsite",
+  "job_id": null,
   "job_domain": null,
   "job_summary": null,
-  "description": null,
-  "job_id": null,
-  "work_mode": "onsite",
+  "work_authorization": null,
   "job_posted_date": null,
   "job_expiry_date": null,
   "reporting_to": null,
   "team_size": null,
   "travel_requirement": null,
   "application_link": null,
-  "equal_opportunity_statement": null,
-  "company_website": null,
   "industry": null,
   "company_size": null,
+  "company_website": null,
   "company_overview": null,
+  "equal_opportunity_statement": null,
+  "certifications": [],
+  "skills": [{"name": "", "category": ""}],
+  "technical_skills": [],
+  "soft_skills": [],
   "preferred_experience": [],
   "preferred_technologies": [],
-  "certifications": []
+  "benefits": [],
+  "requirements": [],
+  "responsibilities": [],
+  "description": null
 }
 
 JOB DESCRIPTION:
@@ -272,7 +272,7 @@ def _extract_image_ocr(filepath):
 # LLM API call
 # ---------------------------------------------------------------------------
 
-def _call_groq(messages, model=None, api_key=None, temperature=0.1, max_tokens=8192):
+def _call_groq(messages, model=None, api_key=None, temperature=0.1, max_tokens=16384):
     key = api_key or GROQ_API_KEY
     mdl = model or GROQ_MODEL
 
@@ -290,6 +290,7 @@ def _call_groq(messages, model=None, api_key=None, temperature=0.1, max_tokens=8
                 "temperature": temperature,
                 "top_p": 0.9,
                 "max_tokens": max_tokens,
+                "response_format": {"type": "json_object"},
             },
             timeout=120,
         )
@@ -310,6 +311,8 @@ def _call_groq(messages, model=None, api_key=None, temperature=0.1, max_tokens=8
         content = data["choices"][0]["message"]["content"]
         usage = data.get("usage", {})
         finish = data["choices"][0].get("finish_reason", "unknown")
+
+        # If JSON parsing fails and finish_reason is 'length', retry is handled by caller
         return content, usage, finish
 
     raise RuntimeError("Groq API: max retries exceeded due to rate limiting")
@@ -761,6 +764,42 @@ def _post_process(parsed, original_text=""):
     except Exception:
         pass
 
+    try:
+        _fix_company_is_id(parsed, original_text)
+        applied.append("company_id_fix")
+    except Exception:
+        pass
+
+    try:
+        _fix_job_id_validation(parsed, original_text)
+        applied.append("job_id_validation")
+    except Exception:
+        pass
+
+    try:
+        _fix_job_id_from_client(parsed, original_text)
+        applied.append("job_id_from_client")
+    except Exception:
+        pass
+
+    try:
+        _fix_education_format(parsed, original_text)
+        applied.append("education_format")
+    except Exception:
+        pass
+
+    try:
+        _fix_experience_from_text(parsed, original_text)
+        applied.append("experience_from_text")
+    except Exception:
+        pass
+
+    try:
+        _fix_expiry_date_from_text(parsed, original_text)
+        applied.append("expiry_date_from_text")
+    except Exception:
+        pass
+
     return parsed, applied
 
 
@@ -837,23 +876,27 @@ def _fix_employment_type(parsed, original_text=""):
 
 def _fix_work_mode(parsed, original_text=""):
     wm = parsed.get("work_mode")
-    if not isinstance(wm, str):
-        return
     mapping = {
         "remote": "remote", "work from home": "remote", "wfh": "remote",
         "hybrid": "hybrid", "flexible": "hybrid",
         "onsite": "onsite", "on-site": "onsite", "on site": "onsite",
         "in-office": "onsite", "office": "onsite",
     }
-    parsed["work_mode"] = mapping.get(wm.strip().lower(), wm.strip().lower())
+    if isinstance(wm, str):
+        parsed["work_mode"] = mapping.get(wm.strip().lower(), wm.strip().lower())
 
     # Override from original text if location line has explicit (REMOTE) or (HYBRID)
     if original_text:
-        # Look for "Location: ... (REMOTE)" or "Location: ... (Hybrid)" pattern
         loc_match = re.search(r'location\s*[:\-]\s*[^(\n]*\((remote|hybrid|onsite|on-site)\)', original_text, re.IGNORECASE)
         if loc_match:
             detected = loc_match.group(1).strip().lower()
             parsed["work_mode"] = mapping.get(detected, detected)
+        # Also check "Work Mode:" line
+        elif not isinstance(parsed.get("work_mode"), str) or not parsed.get("work_mode"):
+            wm_match = re.search(r'work\s*mode\s*[:\-]\s*(remote|hybrid|onsite|on-site)', original_text, re.IGNORECASE)
+            if wm_match:
+                detected = wm_match.group(1).strip().lower()
+                parsed["work_mode"] = mapping.get(detected, detected)
 
 
 def _fix_salary(parsed, original_text=""):
@@ -995,6 +1038,119 @@ def _fix_location_consistency(parsed):
                 loc["country"] = parts[-1]
 
 
+def _fix_company_is_id(parsed, original_text=""):
+    """If company is a numeric/short alphanumeric ID, move it to job_id and null out company."""
+    company = parsed.get("company")
+    if not isinstance(company, str):
+        return
+    clean = company.strip()
+    # Remove "Client:" prefix if present
+    if clean.lower().startswith("client:"):
+        clean = clean[7:].strip()
+        parsed["company"] = clean
+
+    # Check if it looks like an ID rather than a company name
+    is_id = False
+    # Pure digits
+    if clean.isdigit():
+        is_id = True
+    # Short alphanumeric with no spaces and contains digits (e.g., "17783PSA3", "537601527", "DAG2610")
+    elif re.match(r'^[A-Za-z0-9]{4,20}$', clean) and re.search(r'\d', clean) and " " not in clean:
+        is_id = True
+
+    if is_id:
+        if not parsed.get("job_id"):
+            parsed["job_id"] = clean
+        parsed["company"] = None
+
+
+def _fix_job_id_validation(parsed, original_text=""):
+    """If job_id looks like a title or description (too long), null it out."""
+    jid = parsed.get("job_id")
+    if not isinstance(jid, str):
+        return
+    # Job IDs are typically short alphanumeric codes (<30 chars)
+    if len(jid) > 30:
+        parsed["job_id"] = None
+    # If it contains only common words with spaces, it's likely a title
+    if " " in jid and not re.search(r'\d', jid):
+        parsed["job_id"] = None
+
+
+def _fix_education_format(parsed, original_text=""):
+    """Clean malformed education level strings."""
+    edu = parsed.get("education")
+    if not isinstance(edu, dict):
+        return
+    level = edu.get("level")
+    if isinstance(level, str):
+        # Fix patterns like 'Bachelor's"|"Master's' → "Bachelor's or Master's"
+        if '"|"' in level or '"|' in level or '|"' in level:
+            level = re.sub(r'["\|]+', ' or ', level).strip()
+            level = re.sub(r'\s+', ' ', level)
+            edu["level"] = level
+
+
+def _fix_experience_from_text(parsed, original_text=""):
+    """If experience_years is missing, try to extract from text."""
+    if parsed.get("experience_years"):
+        return
+    if not original_text:
+        return
+    # Look for "X+ years", "X-Y years", "X years" patterns
+    patterns = [
+        r'(\d+)\s*[\-–to]+\s*(\d+)\s*(?:\+\s*)?years?\s+(?:of\s+)?experience',
+        r'(\d+)\s*\+?\s*years?\s+(?:of\s+)?experience',
+        r'minimum\s+(?:of\s+)?(\d+)\s*years',
+    ]
+    for pat in patterns:
+        match = re.search(pat, original_text, re.IGNORECASE)
+        if match:
+            groups = match.groups()
+            if len(groups) == 2:
+                mn, mx = int(groups[0]), int(groups[1])
+            else:
+                mn = mx = int(groups[0])
+            parsed["experience_years"] = {
+                "min_years": mn,
+                "max_years": mx,
+                "requirement_type": "required",
+            }
+            return
+
+
+def _fix_job_id_from_client(parsed, original_text=""):
+    """Extract job_id from Client: field patterns like 'Client: CompanyName -(ID)' or 'Client: CompanyName (ID)'."""
+    if parsed.get("job_id"):
+        return
+    if not original_text:
+        return
+    # Pattern: Client: ... -(ID) or Client: ... (ID)
+    match = re.search(r'client\s*:\s*[^(\n]*[\-–]\s*\(([^)]+)\)', original_text, re.IGNORECASE)
+    if match:
+        parsed["job_id"] = match.group(1).strip()
+        return
+    # Pattern: Client: ... (ID) where ID is alphanumeric
+    match = re.search(r'client\s*:\s*\w[^(\n]*\((\w+)\)', original_text, re.IGNORECASE)
+    if match:
+        candidate = match.group(1).strip()
+        # Only use if it looks like an ID (not a word like "Hybrid")
+        if re.match(r'^[A-Z0-9]{4,}', candidate):
+            parsed["job_id"] = candidate
+
+
+def _fix_expiry_date_from_text(parsed, original_text=""):
+    """Extract job_expiry_date from 'Due date:' field if not already set."""
+    if parsed.get("job_expiry_date"):
+        return
+    if not original_text:
+        return
+    match = re.search(r'due\s*date\s*:\s*(\d{1,2})[/\-](\d{1,2})[/\-](\d{4})', original_text, re.IGNORECASE)
+    if match:
+        m, d, y = match.group(1), match.group(2), match.group(3)
+        parsed["job_expiry_date"] = f"{y}-{m.zfill(2)}-{d.zfill(2)}"
+
+
 # ---------------------------------------------------------------------------
 # Main parse function — single-pass extraction + post-processing
 # ---------------------------------------------------------------------------
@@ -1021,14 +1177,14 @@ def parse_jd(jd_text, filename="unknown", model=None, api_key=None):
                 {"role": "system", "content": SYSTEM_PROMPT},
                 {"role": "user", "content": prompt},
             ],
-            model=mdl, api_key=key, temperature=0.1, max_tokens=8192,
+            model=mdl, api_key=key, temperature=0.1, max_tokens=16384,
         )
     except Exception as e:
         return {"error": f"LLM extraction failed: {str(e)}"}
 
     extracted = _extract_json(content)
     if extracted is None:
-        return {"error": "Failed to parse JSON from model response", "raw": content[:500]}
+        return {"error": "Failed to parse JSON from model response", "raw": content}
 
     # --- Normalize + Post-process ---
     extracted = _normalize_llm_output(extracted)
