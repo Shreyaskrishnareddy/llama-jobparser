@@ -38,46 +38,51 @@ RULES:
 
 FIELD-BY-FIELD INSTRUCTIONS:
 
-1. title — Object: {"text": "exact job title", "seniority_level": "Senior"|"Lead"|"Junior"|"Mid"|"Entry"|null, "domain": "data"|"engineering"|"security"|"management"|"IT"|etc}
+1. title — Object: {"text": "exact job title", "seniority_level": "Senior"|"Lead"|"Junior"|"Mid"|"Entry"|null, "domain": "cloud"|"data"|"engineering"|"security"|"management"|"IT"|"networking"|"devops"|"support"|"operations"|etc}
+   Choose domain based on the job title itself. "Cloud Architect" → "cloud", "Data Analyst" → "data", "Security Officer" → "security", "Network Engineer" → "networking", "Project Manager" → "management", "Project Lead" → "management", "Support Analyst" → "support", "Operations Analyst" → "operations", "Systems Analyst" → "IT", "Full Stack Developer" → "engineering".
 
-2. company — Plain string of company name. null if not mentioned.
+2. company — Plain string of company name. null if not mentioned. If "Client:" field contains both an ID and a name (e.g., "DAG2605-Austin Energy"), extract ONLY the company name ("Austin Energy"), not the ID. The ID goes in job_id.
 
 3. location — Object: {"city": str|null, "region": str|null, "country": str|null, "remote": "remote"|"hybrid"|"onsite", "formatted_address": "City, Region, Country"}
+   IMPORTANT: "country" is the NATION (e.g., "India", "USA", "UK"). "region" is the STATE/PROVINCE (e.g., "Telangana", "California"). Do NOT put the country name in region. Example: "Hyderabad, India" → city:"Hyderabad", region:null, country:"India".
 
 4. employment_type — Array of NORMALIZED strings:
    "Full-time"/"Full time" → "full_time", "Part-time" → "part_time", "Contract"/"C2C" → "contract", "Internship" → "internship", "Temporary" → "temporary", "Freelance" → "freelance"
-   Return [] if not stated.
+   IMPORTANT: If a "Duration" is mentioned (e.g., "12 months", "22+ Months", "6 month contract"), the employment type is "contract". If the text says "C2C", "Corp-to-Corp", "W2", or mentions a staffing client, the employment type is "contract". Do NOT default to "full_time" — only use "full_time" if the text explicitly says "Full-time" or "Full time".
+   Return [] if employment type is not stated and no duration is mentioned.
 
 5. salary — Object or null: {"min": number, "max": number, "currency": "USD"|"INR"|"EUR"|"GBP", "period": "year"|"month"|"hour", "ote": false}
-   Convert: "12-18 LPA" → min:1200000, max:1800000, currency:"INR". "$80K-120K" → min:80000, max:120000, currency:"USD". null if not mentioned.
+   Convert ONLY when abbreviations are used: "12-18 LPA" → min:1200000, max:1800000. "$80K-120K" → min:80000, max:120000. "K"=thousands, "LPA"/"L"=lakhs.
+   Do NOT multiply plain numbers: "$70/hr" → min:70, max:70, period:"hour". "$150,000/year" → min:150000, max:150000, period:"year". null if not mentioned.
 
-6. requirements — Array of PLAIN STRINGS. Each string is one requirement/qualification bullet copied EXACTLY from the text.
+6. requirements — Array of PLAIN STRINGS. Each string is one requirement/qualification bullet copied EXACTLY from the text. ONLY include items from the "Required" qualifications/skills section. Do NOT include items from the "Preferred" or "Nice-to-Have" section — those go in preferred_experience.
 
 7. responsibilities — Array of PLAIN STRINGS. Each string is one responsibility bullet copied EXACTLY from the text.
 
 8. skills — Array of objects: [{"name": "skill_name", "category": "category"}]
    Categories: "programming_language", "framework", "database", "cloud", "devops", "tool", "methodology", "domain", "soft_skill", "networking", "os", "other"
-   Extract ALL skills from everywhere in the JD. Do NOT include "source" or any extra keys.
+   Extract ALL skills from everywhere in the JD — required skills, preferred skills, responsibilities, and description. Include alternatives separated by "or"/"/" (e.g., "Power BI or Tableau" → extract BOTH). Extract specific technologies mentioned inside parentheses too (e.g., "Oracle RAC (Real Application Clusters)" → extract "Oracle RAC"). Be exhaustive — a technical JD may have 20-30+ skills. Do NOT include "source" or any extra keys.
 
 8b. technical_skills — Array of PLAIN STRINGS of technical/hard skills only (e.g., ["SQL", "Power BI", "Excel", "Python"]). Extract from the skills list above, including only those with categories: programming_language, framework, database, cloud, devops, tool, networking, os.
 
-8c. soft_skills — Array of PLAIN STRINGS of soft/interpersonal skills only (e.g., ["Communication", "Leadership", "Problem Solving"]). Extract from the skills list above, including only those with category: soft_skill.
+8c. soft_skills — Array of PLAIN STRINGS of soft/interpersonal skills only (e.g., ["Communication", "Leadership", "Problem Solving"]). ONLY include soft skills if the EXACT word appears in the JD text. For example, only include "Communication" if the word "communication" literally appears in the text. If the JD does not explicitly name any soft skills, return []. NEVER guess or infer soft skills from job responsibilities.
 
 9. education — Object or null: {"level": "Bachelor's"|"Master's"|"PhD"|etc, "field": "field of study"}
 
 10. experience_years — Object or null: {"min_years": number, "max_years": number, "requirement_type": "required"|"preferred"}
+    Look for patterns like "X years of experience", "X+ years", "X-Y years". If only one number given (e.g., "8 years"), use it as both min and max.
 
-11. benefits — Array of PLAIN STRINGS like ["health insurance", "401k", "bonus"]. [] if none.
+11. benefits — Array of PLAIN STRINGS like ["health insurance", "401k", "bonus"]. ONLY include benefits that are explicitly named in the text. If the JD says something vague like "as per agreement" or "standard benefits", return []. Do NOT invent specific benefits.
 
-12. work_authorization — String or null.
+12. work_authorization — String or null. Include residency or location restrictions like "LOCAL ONLY", "must reside in...", "US citizens only", "work permit required", etc.
 
 13. job_domain — String like "Information Technology", "Healthcare", etc. Infer from context if clear.
 
-14. job_summary — The brief job summary paragraph (usually 1-3 sentences at the top describing the role). This is the SHORT overview.
+14. job_summary — The brief job summary paragraph (usually 1-3 sentences at the top describing the role). This is the SHORT overview. Look for sections like "Role Summary", "Objective", "Scope/Description of Services", "Overview", or the first paragraph describing the role.
 
-15. description — The FULL detailed job description text. This is the longer, more detailed paragraph(s) that describe the role in depth, including the full "Job Description" or "About the Role" section. If there is no separate detailed description beyond the summary, set to null.
+15. description — The FULL detailed job description text. This is the longer, more detailed paragraph(s) that describe the role in depth. Look for sections titled "Job Description", "About the Role", "Scope/Description of Services", "Description of Services", or any paragraph that describes the role duties in detail. If the JD has only one descriptive paragraph, use it as description and use its first 1-2 sentences as job_summary.
 
-16. job_id — String or null.
+16. job_id — String or null. Look for fields like "Job ID", "Reference ID", "Requisition ID", "Client ID", "Client:", or any alphanumeric code identifying the position. If "Client:" has "DAG2605-Austin Energy", the job_id is "DAG2605". Extract the code/ID portion.
 
 16. work_mode — One of: "remote", "hybrid", "onsite". Default "onsite" if not stated.
 
@@ -85,7 +90,7 @@ FIELD-BY-FIELD INSTRUCTIONS:
 
 18. job_expiry_date — "YYYY-MM-DD" format string or null.
 
-19. reporting_to — String or null.
+19. reporting_to — String or null. ONLY include if the JD explicitly says "Reports to", "Reporting To", or "Manager:". Do NOT guess from company name or client name.
 
 20. team_size — String or null.
 
@@ -95,24 +100,27 @@ FIELD-BY-FIELD INSTRUCTIONS:
 
 23. equal_opportunity_statement — String or null.
 
-24. company_website — URL string or null.
+24. company_website — URL string or null. Can be inferred from application_link domain if clearly a company domain (e.g., "https://arytic.com/careers/..." → "https://arytic.com").
 
-25. industry — String or null.
+25. industry — String or null. Infer from company overview or job context if clearly identifiable (e.g., "recruitment platform" → "Human Resources / Technology").
 
 26. company_size — String or null.
 
 27. company_overview — String or null.
 
-28. preferred_experience — Array of PLAIN STRINGS. [] if none.
+28. preferred_experience — Array of PLAIN STRINGS. Capture ALL preferred/nice-to-have experience items. [] if none.
 
-29. preferred_technologies — Array of PLAIN STRINGS. [] if none.
+29. preferred_technologies — Array of PLAIN STRINGS. Extract ONLY technologies mentioned in the "Preferred Skills", "Nice-to-Have", "Familiarity with", or "Valuable skills" section. Do NOT include technologies from "Required Qualifications" or "Responsibilities" sections. Examples: "Lambda", "Azure Functions", "Databricks". [] if none.
 
 30. certifications — Array of PLAIN STRINGS. [] if none.
 
-CRITICAL:
+CRITICAL — MUST FOLLOW:
 - requirements, responsibilities, benefits, preferred_experience, preferred_technologies, certifications MUST be arrays of plain strings. NOT arrays of objects.
 - skills MUST be [{"name": "...", "category": "..."}] with ONLY those two keys per skill. No "source" key.
 - company MUST be a plain string, NOT an object.
+- employment_type: If "Duration" is mentioned (e.g., "22+ Months", "12 months", "6 month"), this is a CONTRACT role → use ["contract"]. Only use "full_time" if the JD explicitly says "Full-time" or "Full time".
+- soft_skills: NEVER infer or guess. Only include a soft skill if the exact word (e.g., "communication", "leadership") literally appears in the JD text. If no soft skills are explicitly written, return [].
+- All fields: If data is not present in the JD text, use null or []. NEVER fabricate values.
 
 {
   "title": {"text": "", "seniority_level": null, "domain": ""},
@@ -363,6 +371,12 @@ def _normalize_llm_output(parsed):
     if not isinstance(parsed, dict):
         return parsed
 
+    # Fix string "null" → actual None for all string fields
+    _NULL_STRINGS = {"null", "none", "n/a", ""}
+    for key, val in parsed.items():
+        if isinstance(val, str) and val.strip().lower() in _NULL_STRINGS:
+            parsed[key] = None
+
     # Fix company: if it's an object like {"text": "X", "source": "Y"}, extract the string
     company = parsed.get("company")
     if isinstance(company, dict):
@@ -444,13 +458,18 @@ def _normalize_llm_output(parsed):
             "domain": title.get("domain"),
         }
 
-    # Fix location: strip extra keys
+    # Fix location: strip extra keys and normalize string "null" to actual None
     loc = parsed.get("location")
     if isinstance(loc, dict):
+        def _null_str(v):
+            """Convert string 'null'/'None'/'' to actual None."""
+            if isinstance(v, str) and v.strip().lower() in ("null", "none", "n/a", ""):
+                return None
+            return v
         parsed["location"] = {
-            "city": loc.get("city"),
-            "region": loc.get("region"),
-            "country": loc.get("country"),
+            "city": _null_str(loc.get("city")),
+            "region": _null_str(loc.get("region")),
+            "country": _null_str(loc.get("country")),
             "remote": loc.get("remote", "onsite"),
             "formatted_address": loc.get("formatted_address", ""),
         }
@@ -681,23 +700,23 @@ def _build_output(original_text, parsed, source_filename, metadata):
 # Post-processing
 # ---------------------------------------------------------------------------
 
-def _post_process(parsed):
+def _post_process(parsed, original_text=""):
     if not isinstance(parsed, dict):
         return parsed, []
     applied = []
 
     try:
-        _fix_employment_type(parsed)
+        _fix_employment_type(parsed, original_text)
         applied.append("employment_type_normalize")
     except Exception:
         pass
     try:
-        _fix_work_mode(parsed)
+        _fix_work_mode(parsed, original_text)
         applied.append("work_mode_normalize")
     except Exception:
         pass
     try:
-        _fix_salary(parsed)
+        _fix_salary(parsed, original_text)
         applied.append("salary_numbers")
     except Exception:
         pass
@@ -715,6 +734,30 @@ def _post_process(parsed):
     try:
         _fix_derive_skill_splits(parsed)
         applied.append("derive_skill_splits")
+    except Exception:
+        pass
+
+    try:
+        _fix_soft_skills_hallucination(parsed, original_text)
+        applied.append("soft_skills_validation")
+    except Exception:
+        pass
+
+    try:
+        _fix_benefits_hallucination(parsed, original_text)
+        applied.append("benefits_validation")
+    except Exception:
+        pass
+
+    try:
+        _fix_clean_list_artifacts(parsed)
+        applied.append("clean_list_artifacts")
+    except Exception:
+        pass
+
+    try:
+        _fix_reporting_to_hallucination(parsed, original_text)
+        applied.append("reporting_to_validation")
     except Exception:
         pass
 
@@ -745,7 +788,7 @@ def _fix_derive_skill_splits(parsed):
         ]
 
 
-def _fix_employment_type(parsed):
+def _fix_employment_type(parsed, original_text=""):
     emp = parsed.get("employment_type")
     if not isinstance(emp, list):
         return
@@ -762,8 +805,37 @@ def _fix_employment_type(parsed):
         for i in emp if isinstance(i, str)
     ]
 
+    # If LLM said full_time but original text has duration/contract signals, fix it
+    lower_text = original_text.lower()
+    has_duration = bool(re.search(r'duration\s*[:\-]\s*\d+', lower_text))
+    has_contract_signal = any(kw in lower_text for kw in ["c2c", "corp-to-corp", "w2", "corp to corp"])
+    has_explicit_fulltime = any(kw in lower_text for kw in ["full-time", "full time", "fulltime"])
 
-def _fix_work_mode(parsed):
+    has_contract_text = "contract" in lower_text
+
+    if (has_duration or has_contract_signal or has_contract_text) and not has_explicit_fulltime:
+        # Replace full_time with contract
+        parsed["employment_type"] = [
+            "contract" if t == "full_time" else t
+            for t in parsed["employment_type"]
+        ]
+        # If it was empty or only had full_time, ensure contract is there
+        if "contract" not in parsed["employment_type"]:
+            parsed["employment_type"].append("contract")
+    elif (has_duration or has_contract_signal or has_contract_text) and has_explicit_fulltime:
+        # Both contract and full_time are explicitly stated — include both
+        if "contract" not in parsed["employment_type"]:
+            parsed["employment_type"].append("contract")
+
+    # Dedup
+    seen = set()
+    parsed["employment_type"] = [
+        t for t in parsed["employment_type"]
+        if t not in seen and not seen.add(t)
+    ]
+
+
+def _fix_work_mode(parsed, original_text=""):
     wm = parsed.get("work_mode")
     if not isinstance(wm, str):
         return
@@ -775,8 +847,16 @@ def _fix_work_mode(parsed):
     }
     parsed["work_mode"] = mapping.get(wm.strip().lower(), wm.strip().lower())
 
+    # Override from original text if location line has explicit (REMOTE) or (HYBRID)
+    if original_text:
+        # Look for "Location: ... (REMOTE)" or "Location: ... (Hybrid)" pattern
+        loc_match = re.search(r'location\s*[:\-]\s*[^(\n]*\((remote|hybrid|onsite|on-site)\)', original_text, re.IGNORECASE)
+        if loc_match:
+            detected = loc_match.group(1).strip().lower()
+            parsed["work_mode"] = mapping.get(detected, detected)
 
-def _fix_salary(parsed):
+
+def _fix_salary(parsed, original_text=""):
     sal = parsed.get("salary")
     if not isinstance(sal, dict):
         return
@@ -788,6 +868,18 @@ def _fix_salary(parsed):
                 sal[key] = float(clean) if "." in clean else int(clean)
             except ValueError:
                 pass
+
+    # Fix: LLM sometimes multiplies hourly rates by 1000 (e.g., $70/hr → 70000)
+    # If period is "hour" and values are unreasonably high, divide by 1000
+    period = sal.get("period", "year")
+    if period == "hour":
+        for key in ("min", "max"):
+            val = sal.get(key)
+            if isinstance(val, (int, float)) and val > 500:
+                sal[key] = val / 1000
+                # Convert to int if it's a whole number
+                if sal[key] == int(sal[key]):
+                    sal[key] = int(sal[key])
 
 
 def _fix_skill_dedup(parsed):
@@ -805,11 +897,102 @@ def _fix_skill_dedup(parsed):
     parsed["skills"] = deduped
 
 
+def _fix_soft_skills_hallucination(parsed, original_text=""):
+    """Remove soft skills that don't actually appear in the original JD text."""
+    soft = parsed.get("soft_skills")
+    if not isinstance(soft, list) or not original_text:
+        return
+    lower_text = original_text.lower()
+    # Known soft skill keywords to validate against
+    _VALID_SOFT_SKILLS = {
+        "communication", "leadership", "teamwork", "problem-solving", "problem solving",
+        "analytical", "interpersonal", "collaboration", "presentation", "negotiation",
+        "mentoring", "coaching", "adaptability", "creativity", "critical thinking",
+        "decision making", "decision-making", "time management", "organizational",
+        "attention to detail", "troubleshooting", "documentation", "customer-focused",
+        "self-starter", "multitasking", "conflict resolution", "strategic thinking",
+    }
+    validated = []
+    for s in soft:
+        if not isinstance(s, str):
+            continue
+        s_lower = s.lower().strip()
+        # Must appear in text AND be a recognized soft skill
+        if s_lower in lower_text and any(kw in s_lower for kw in _VALID_SOFT_SKILLS):
+            validated.append(s)
+    parsed["soft_skills"] = validated
+
+
+def _fix_benefits_hallucination(parsed, original_text=""):
+    """Remove benefits that don't actually appear in the original JD text."""
+    benefits = parsed.get("benefits")
+    if not isinstance(benefits, list) or not original_text:
+        return
+    lower_text = original_text.lower()
+    validated = [b for b in benefits if isinstance(b, str) and b.lower() in lower_text]
+    parsed["benefits"] = validated
+
+
+def _fix_reporting_to_hallucination(parsed, original_text=""):
+    """Remove reporting_to if it's not actually stated with 'Reports to' or 'Reporting To' in the text."""
+    reporting = parsed.get("reporting_to")
+    if not reporting or not original_text:
+        return
+    lower_text = original_text.lower()
+    # Check if the JD explicitly has a reporting_to section
+    has_reporting_section = any(kw in lower_text for kw in [
+        "reporting to", "reports to", "report to:", "manager:",
+        "reporting to:", "reports to:",
+    ])
+    if not has_reporting_section:
+        parsed["reporting_to"] = None
+
+
+def _fix_clean_list_artifacts(parsed):
+    """Clean form artifacts like 'Yes/No' prefix from list items."""
+    for field in ("preferred_experience", "preferred_technologies", "requirements",
+                  "responsibilities", "benefits", "certifications"):
+        items = parsed.get(field)
+        if not isinstance(items, list):
+            continue
+        cleaned = []
+        for item in items:
+            if isinstance(item, str):
+                # Strip "Yes/No " prefix from form fields
+                item = re.sub(r'^(Yes/No\s+)', '', item, flags=re.IGNORECASE).strip()
+                # Strip leading "X years of " or "X-Y years of " for preferred items
+                # (keep the content, strip the year prefix only if it's redundant)
+                if item:
+                    cleaned.append(item)
+        parsed[field] = cleaned
+
+
 def _fix_location_consistency(parsed):
     loc = parsed.get("location")
     wm = parsed.get("work_mode")
     if isinstance(loc, dict) and isinstance(wm, str):
         loc["remote"] = wm
+
+    # Fix country/region confusion: if country is empty but region looks like a country, swap
+    if isinstance(loc, dict):
+        country = (loc.get("country") or "").strip()
+        region = (loc.get("region") or "").strip()
+        _COUNTRIES = {
+            "india", "usa", "us", "united states", "united kingdom", "uk",
+            "canada", "australia", "germany", "france", "singapore", "japan",
+            "china", "brazil", "uae", "netherlands", "ireland", "sweden",
+            "switzerland", "israel", "south korea", "new zealand", "spain",
+            "italy", "mexico", "poland", "denmark", "norway", "finland",
+        }
+        if region and not country and region.lower() in _COUNTRIES:
+            loc["country"] = region
+            loc["region"] = None
+        if not country and not region:
+            # Try to extract from formatted_address
+            addr = loc.get("formatted_address", "")
+            parts = [p.strip() for p in addr.split(",") if p.strip()]
+            if len(parts) >= 2 and parts[-1].lower() in _COUNTRIES:
+                loc["country"] = parts[-1]
 
 
 # ---------------------------------------------------------------------------
@@ -849,7 +1032,7 @@ def parse_jd(jd_text, filename="unknown", model=None, api_key=None):
 
     # --- Normalize + Post-process ---
     extracted = _normalize_llm_output(extracted)
-    extracted, pp_applied = _post_process(extracted)
+    extracted, pp_applied = _post_process(extracted, jd_text)
 
     elapsed_ms = int((time.time() - start) * 1000)
 
