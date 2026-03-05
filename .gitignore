@@ -4,3 +4,6 @@ __pycache__/
 .venv/
 venv/
 uploads/
+
+# Test results (QA reports, cycle outputs)
+test-results/

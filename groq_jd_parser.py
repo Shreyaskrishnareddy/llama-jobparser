@@ -1229,7 +1229,16 @@ def parse_jd(jd_text, filename="unknown", model=None, api_key=None):
     extracted["source_type"] = "file"
     extracted["language_detected"] = "en"
 
-    return _build_output(jd_text, extracted, filename, metadata)
+    output = _build_output(jd_text, extracted, filename, metadata)
+
+    # Enrich with taxonomy normalization (canonical IDs, categories, etc.)
+    try:
+        from groq_taxonomy import enrich_jd
+        output = enrich_jd(output)
+    except ImportError:
+        pass
+
+    return output
 
 
 # ---------------------------------------------------------------------------

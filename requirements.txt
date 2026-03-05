@@ -10,3 +10,6 @@ Pillow>=10.0
 olefile>=0.47
 gunicorn>=21.2
 openpyxl>=3.1
+
+# Taxonomy (shared skill/title/cert normalization)
+groq-taxonomy @ git+https://github.com/Shreyaskrishnareddy/monorepo.git#subdirectory=packages/taxonomy
