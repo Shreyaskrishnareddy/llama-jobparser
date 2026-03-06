@@ -145,6 +145,7 @@ Structured JSON Response + Metadata
 | **DOCX Parsing** | docx2txt | DOCX text extraction |
 | **DOC Parsing** | antiword + olefile | Legacy .doc support |
 | **OCR** | Tesseract + Pillow | Scanned PDFs and images |
+| **Taxonomy** | groq-taxonomy (shared library) | Skill/title/cert/degree/industry normalization |
 | **Deployment** | Docker / Render | Production hosting |
 
 ### Dependencies (requirements.txt)
@@ -161,9 +162,92 @@ pytesseract>=0.3
 Pillow>=10.0
 olefile>=0.47
 gunicorn>=21.2
+openpyxl>=3.1
+groq-taxonomy @ git+https://github.com/Shreyaskrishnareddy/monorepo.git#subdirectory=packages/taxonomy
 ```
 
 Post-processing uses only stdlib (`re`, `uuid`, `datetime`, `time`, `json`) — no additional dependencies.
+
+### Shared Library: groq-taxonomy
+
+The project uses `groq-taxonomy`, a shared normalization library from the team monorepo, to enrich parsed JD data with canonical vocabularies.
+
+**Source:** `git+https://github.com/Shreyaskrishnareddy/monorepo.git#subdirectory=packages/taxonomy`
+**Version:** 0.1.0
+**Dependencies:** None (zero external dependencies)
+
+#### What It Does
+
+After the LLM parses a JD, post-processing runs, and confidence/provenance is built, `enrich_jd()` normalizes free-text fields to canonical IDs. This enables structured matching between job descriptions and resumes. The import is wrapped in `try/except ImportError` so the parser works without it installed.
+
+```python
+from groq_taxonomy import enrich_jd
+output = enrich_jd(output)  # adds _taxonomy key, leaves original fields untouched
+```
+
+`enrich_jd()` handles the JD parser's `{value, confidence, provenance}` envelope format, unwrapping values before normalization.
+
+#### Taxonomy Modules
+
+| Module | Data File | Entries | Key Functions |
+|--------|-----------|---------|---------------|
+| **skills** | `skills.json` | 329 skills | `normalize_skill(name)` → canonical ID; `classify_skill(id)` → display name, category, subcategory, domain, type, related skills |
+| **titles** | `titles.json` | 45 titles + 11 seniority patterns | `normalize_title(text)` → canonical ID, display name, seniority level + weight, function |
+| **education** | `degrees.json` + `fields_of_study.json` | 6 degree levels + 33 fields | `normalize_degree(degree, field)` → level, weight, display name, field |
+| **certifications** | `certifications.json` | 56 certs | `normalize_cert(text)` → canonical ID, display name, issuer, domain, category |
+| **industries** | `industries.json` | 14 industries | `classify_industry(text)` → industry ID; `classify_industry_multi(text)` → ranked list with scores |
+
+#### Text Normalization
+
+The library uses multi-tier text matching (`_text.py`):
+
+- **Standard key** (`make_lookup_key`): lowercased, preserves `#`, `+`, `.` (so "C#" and "C++" stay distinct)
+- **Aggressive key** (`make_alias_key`): strips dots/hyphens so "React.js", "reactjs", "react-js" all unify
+- **Version stripping**: "Python 3.9" → "python", "Angular 11" → "angular"
+- **Suffix variations**: tries "js", ".js", "lang" suffixes for broader matching
+
+#### Skill Categories
+
+Each skill record includes: `id`, `display_name`, `aliases` (e.g., "k8s" → kubernetes), `category` (programming_language, framework, cloud, database, etc.), `subcategory`, `domain` (software_engineering, data_science, etc.), `type` (technical/soft), and `related` skill IDs.
+
+#### Title Seniority Detection
+
+Titles are decomposed into a base role (e.g., `software_engineer`) plus a seniority level with numeric weights:
+
+| Seniority | Weight |
+|-----------|--------|
+| Intern | 0 |
+| Junior | 1 |
+| Mid | 2 |
+| Senior | 3 |
+| Staff | 4 |
+| Principal | 5 |
+| Distinguished | 6 |
+| VP | 7 |
+| Director | 8 |
+| CTO/CIO | 9 |
+
+#### Degree Levels
+
+| Level | Weight |
+|-------|--------|
+| High School | 0 |
+| Certificate | 1 |
+| Associate | 2 |
+| Bachelors | 3 |
+| Masters | 4 |
+| Doctorate | 5 |
+
+#### Enrichment Output
+
+All enrichment data is placed in a `_taxonomy` key on the parsed result, leaving original fields untouched. The enrichment includes:
+
+1. **Skills**: Deduplicated by canonical ID with category/subcategory/domain/type/related metadata
+2. **Job title**: Normalized with seniority detection
+3. **Education**: Degree level + field of study normalization
+4. **Certifications**: Canonical names with issuer and domain
+5. **Industry**: Classification from the job_domain field
+6. **Skill summary**: Counts by category and domain
 
 ---
 
