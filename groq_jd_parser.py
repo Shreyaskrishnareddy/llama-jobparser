@@ -51,6 +51,10 @@ FIELD-BY-FIELD INSTRUCTIONS:
    IMPORTANT: If a "Duration" is mentioned (e.g., "12 months", "22+ Months", "6 month contract"), the employment type is "contract". If the text says "C2C", "Corp-to-Corp", "W2", or mentions a staffing client, the employment type is "contract". Do NOT default to "full_time" — only use "full_time" if the text explicitly says "Full-time" or "Full time".
    Return [] if employment type is not stated and no duration is mentioned.
 
+4b. contract_type — String or null. If the role is a contract, capture the contract sub-type: "C2C", "W2", "1099", "Corp-to-Corp", or null if not specified.
+
+4c. contract_duration — String or null. If a duration is mentioned (e.g., "Duration: 11 Months", "22+ Months", "12 month engagement"), capture the full duration string verbatim (e.g., "11 Months", "22+ Months"). null if not mentioned.
+
 5. salary — Object or null: {"min": number, "max": number, "currency": "USD"|"INR"|"EUR"|"GBP", "period": "year"|"month"|"hour", "ote": false}
    Convert ONLY when abbreviations are used: "12-18 LPA" → min:1200000, max:1800000. "$80K-120K" → min:80000, max:120000. "K"=thousands, "LPA"/"L"=lakhs.
    Do NOT multiply plain numbers: "$70/hr" → min:70, max:70, period:"hour". "$150,000/year" → min:150000, max:150000, period:"year". null if not mentioned.
@@ -59,13 +63,18 @@ FIELD-BY-FIELD INSTRUCTIONS:
 
 7. responsibilities — Array of PLAIN STRINGS. Each string is one responsibility bullet copied EXACTLY from the text.
 
-8. skills — Array of objects: [{"name": "skill_name", "category": "category"}]
+8. skills — Array of objects: [{"name": "skill_name", "category": "category", "required_years": number_or_null}]
    Categories: "programming_language", "framework", "database", "cloud", "devops", "tool", "methodology", "domain", "soft_skill", "networking", "os", "other"
    Extract ALL skills from everywhere in the JD — required skills, preferred skills, responsibilities, and description. Include alternatives separated by "or"/"/" (e.g., "Power BI or Tableau" → extract BOTH). Extract specific technologies mentioned inside parentheses too (e.g., "Oracle RAC (Real Application Clusters)" → extract "Oracle RAC"). Be exhaustive — a technical JD may have 20-30+ skills. Do NOT include "source" or any extra keys.
+   required_years: If the JD specifies experience years for a specific skill (e.g., "10 Years of Experience in Cisco technologies" → required_years: 10, "3-5 years of Java" → required_years: 3), extract the minimum number. Use null if no specific years are mentioned for that skill.
 
 8b. technical_skills — Array of PLAIN STRINGS of technical/hard skills only (e.g., ["SQL", "Power BI", "Excel", "Python"]). Extract from the skills list above, including only those with categories: programming_language, framework, database, cloud, devops, tool, networking, os.
 
-8c. soft_skills — Array of PLAIN STRINGS of soft/interpersonal skills only (e.g., ["Communication", "Leadership", "Problem Solving"]). ONLY include soft skills if the EXACT word appears in the JD text. For example, only include "Communication" if the word "communication" literally appears in the text. If the JD does not explicitly name any soft skills, return []. NEVER guess or infer soft skills from job responsibilities.
+8c. soft_skills — Array of PLAIN STRINGS of soft/interpersonal skills only.
+   Extract EACH soft skill as a SINGLE KEYWORD or SHORT PHRASE (1-3 words max). Use the simplest canonical form:
+   "Communication", "Leadership", "Teamwork", "Problem Solving", "Analytical", "Collaboration", "Presentation", "Negotiation", "Mentoring", "Adaptability", "Critical Thinking", "Decision Making", "Time Management", "Organizational", "Attention to Detail", "Troubleshooting", "Documentation", "Stakeholder Management", "Interpersonal", "Conflict Resolution", "Strategic Thinking", "Multitasking", "Creativity", "Customer-Focused", "Self-Starter", "Coaching".
+   Include a soft skill if the keyword or a close variant appears ANYWHERE in the JD text — in requirements, responsibilities, description, qualifications, or any other section. For example, if the text says "maintaining clear communication among stakeholders" → include "Communication". If it says "Strong problem-solving skills" → include "Problem Solving". If it says "facilitate collaboration" → include "Collaboration".
+   Do NOT guess skills that have zero textual basis. But DO capture skills that are clearly referenced even if embedded in sentences.
 
 9. education — Object or null: {"level": "Bachelor's"|"Master's"|"PhD"|etc, "field": "field of study"}
 
@@ -78,9 +87,9 @@ FIELD-BY-FIELD INSTRUCTIONS:
 
 13. job_domain — String like "Information Technology", "Healthcare", etc. Infer from context if clear.
 
-14. job_summary — The brief job summary paragraph (usually 1-3 sentences at the top describing the role). This is the SHORT overview. Look for sections like "Role Summary", "Objective", "Scope/Description of Services", "Overview", or the first paragraph describing the role.
+14. job_summary — Copy the ENTIRE "Role Summary", "Objective", "Scope/Description of Services", "Overview", or opening paragraph(s) describing the role VERBATIM. Include ALL sentences in that section, not just the first one. This should be the complete summary paragraph — typically 2-5 sentences. Do NOT truncate or summarize. Copy word for word.
 
-15. description — The FULL detailed job description text. This is the longer, more detailed paragraph(s) that describe the role in depth. Look for sections titled "Job Description", "About the Role", "Scope/Description of Services", "Description of Services", or any paragraph that describes the role duties in detail. If the JD has only one descriptive paragraph, use it as description and use its first 1-2 sentences as job_summary.
+15. description — Copy the ENTIRE "Job Description", "About the Role", "Description of Services" section VERBATIM, word for word. Include every sentence and every paragraph in that section. Do NOT summarize, do NOT shorten, do NOT paraphrase. If the section has multiple paragraphs, include all of them separated by newlines. This must be the complete text of the description section.
 
 16. job_id — String or null. Look for fields like "Job ID", "Reference ID", "Requisition ID", "Client ID", "Client:", or any alphanumeric code identifying the position. If "Client:" has "DAG2605-Austin Energy", the job_id is "DAG2605". Extract the code/ID portion.
 
@@ -106,7 +115,7 @@ FIELD-BY-FIELD INSTRUCTIONS:
 
 26. company_size — String or null.
 
-27. company_overview — String or null.
+27. company_overview — Copy the ENTIRE "Company Overview", "About the Company", "About Us" section VERBATIM. Include ALL sentences. Do NOT truncate to one line. null if not present.
 
 28. preferred_experience — Array of PLAIN STRINGS. Capture ALL preferred/nice-to-have experience items. [] if none.
 
@@ -116,10 +125,13 @@ FIELD-BY-FIELD INSTRUCTIONS:
 
 CRITICAL — MUST FOLLOW:
 - requirements, responsibilities, benefits, preferred_experience, preferred_technologies, certifications MUST be arrays of plain strings. NOT arrays of objects.
-- skills MUST be [{"name": "...", "category": "..."}] with ONLY those two keys per skill. No "source" key.
+- skills MUST be [{"name": "...", "category": "...", "required_years": ...}] with ONLY those three keys per skill. No "source" key.
 - company MUST be a plain string, NOT an object.
 - employment_type: If "Duration" is mentioned (e.g., "22+ Months", "12 months", "6 month"), this is a CONTRACT role → use ["contract"]. Only use "full_time" if the JD explicitly says "Full-time" or "Full time".
-- soft_skills: NEVER infer or guess. Only include a soft skill if the exact word (e.g., "communication", "leadership") literally appears in the JD text. If no soft skills are explicitly written, return [].
+- soft_skills: Include a soft skill if its keyword (e.g., "communication", "leadership", "collaboration", "problem-solving") appears ANYWHERE in the JD text — in responsibilities, requirements, description, or any section. Use the SHORT canonical form (1-3 words). Do NOT guess skills with no textual basis.
+- job_summary: Copy the ENTIRE summary/objective section VERBATIM — ALL sentences, not just the first one.
+- description: Copy the ENTIRE job description section VERBATIM — ALL paragraphs, not just the first sentence.
+- company_overview: Copy the ENTIRE company overview section VERBATIM.
 - All fields: If data is not present in the JD text, use null or []. NEVER fabricate values.
 
 {
@@ -127,6 +139,8 @@ CRITICAL — MUST FOLLOW:
   "company": "",
   "location": {"city": "", "region": null, "country": "", "remote": "", "formatted_address": ""},
   "employment_type": [],
+  "contract_type": null,
+  "contract_duration": null,
   "salary": null,
   "education": null,
   "experience_years": null,
@@ -153,7 +167,7 @@ CRITICAL — MUST FOLLOW:
   "preferred_experience": [],
   "preferred_technologies": [],
   "benefits": [],
-  "skills": [{"name": "", "category": ""}],
+  "skills": [{"name": "", "category": "", "required_years": null}],
   "technical_skills": [],
   "soft_skills": []
 }
@@ -411,18 +425,29 @@ def _normalize_llm_output(parsed):
                                 break
             parsed[list_field] = cleaned
 
-    # Fix skills: strip any extra keys beyond name and category
+    # Fix skills: strip any extra keys beyond name, category, required_years
     skills = parsed.get("skills")
     if isinstance(skills, list):
         cleaned_skills = []
         for skill in skills:
             if isinstance(skill, dict):
+                req_years = skill.get("required_years")
+                if isinstance(req_years, str):
+                    try:
+                        req_years = int(re.sub(r'[^\d]', '', req_years)) if re.search(r'\d', req_years) else None
+                    except (ValueError, TypeError):
+                        req_years = None
+                elif isinstance(req_years, float):
+                    req_years = int(req_years)
+                elif not isinstance(req_years, int):
+                    req_years = None
                 cleaned_skills.append({
                     "name": skill.get("name", ""),
                     "category": skill.get("category", "other"),
+                    "required_years": req_years,
                 })
             elif isinstance(skill, str):
-                cleaned_skills.append({"name": skill, "category": "other"})
+                cleaned_skills.append({"name": skill, "category": "other", "required_years": None})
         parsed["skills"] = cleaned_skills
 
     # Fix salary: strip any extra keys
@@ -592,7 +617,8 @@ def _build_provenance(original_text, field_name, value, extractor_name):
 
 _BASE_CONFIDENCE = {
     "title": 0.95, "company": 0.95, "location": 0.90,
-    "employment_type": 0.95, "salary": 0.80, "requirements": 0.90,
+    "employment_type": 0.95, "contract_type": 0.90, "contract_duration": 0.90,
+    "salary": 0.80, "requirements": 0.90,
     "responsibilities": 0.95, "skills": 0.90, "technical_skills": 0.90,
     "soft_skills": 0.90, "education": 0.90, "experience_years": 0.95,
     "benefits": 0.85, "work_authorization": 0.85, "job_domain": 0.85,
@@ -605,6 +631,7 @@ _BASE_CONFIDENCE = {
 _EXTRACTOR_NAMES = {
     "title": "job_title_extractor", "company": "company_label_extractor",
     "location": "location_extractor", "employment_type": "employment_type_extractor",
+    "contract_type": "employment_type_extractor", "contract_duration": "employment_type_extractor",
     "salary": "salary_extractor", "requirements": "sectionizer",
     "responsibilities": "sectionizer", "skills": "skills_extractor",
     "technical_skills": "skills_extractor", "soft_skills": "skills_extractor",
@@ -639,7 +666,9 @@ def _field_status(confidence):
 # ---------------------------------------------------------------------------
 
 _ALL_FIELDS = [
-    "title", "company", "location", "employment_type", "salary",
+    "title", "company", "location", "employment_type",
+    "contract_type", "contract_duration",
+    "salary",
     "requirements", "responsibilities", "skills", "technical_skills",
     "soft_skills", "education", "experience_years", "benefits",
     "work_authorization", "job_domain", "job_summary", "description",
@@ -803,6 +832,42 @@ def _post_process(parsed, original_text=""):
     except Exception:
         pass
 
+    try:
+        _fix_summary_from_text(parsed, original_text)
+        applied.append("summary_from_text")
+    except Exception:
+        pass
+
+    try:
+        _fix_description_from_text(parsed, original_text)
+        applied.append("description_from_text")
+    except Exception:
+        pass
+
+    try:
+        _fix_company_overview_from_text(parsed, original_text)
+        applied.append("company_overview_from_text")
+    except Exception:
+        pass
+
+    try:
+        _fix_contract_details(parsed, original_text)
+        applied.append("contract_details")
+    except Exception:
+        pass
+
+    try:
+        _fix_soft_skills_from_text(parsed, original_text)
+        applied.append("soft_skills_from_text")
+    except Exception:
+        pass
+
+    try:
+        _fix_skill_experience_from_requirements(parsed, original_text)
+        applied.append("skill_experience_from_requirements")
+    except Exception:
+        pass
+
     return parsed, applied
 
 
@@ -853,7 +918,9 @@ def _fix_employment_type(parsed, original_text=""):
     has_contract_signal = any(kw in lower_text for kw in ["c2c", "corp-to-corp", "w2", "corp to corp"])
     has_explicit_fulltime = any(kw in lower_text for kw in ["full-time", "full time", "fulltime"])
 
-    has_contract_text = "contract" in lower_text
+    # Use word-boundary matching: "contract" as a standalone word, not inside "contractor", "subcontract", etc.
+    # Also match "Contract" in label contexts like "Contract Type:", "C2C Contract"
+    has_contract_text = bool(re.search(r'\bcontract\b', lower_text))
 
     if (has_duration or has_contract_signal or has_contract_text) and not has_explicit_fulltime:
         # Replace full_time with contract
@@ -944,29 +1011,158 @@ def _fix_skill_dedup(parsed):
 
 
 def _fix_soft_skills_hallucination(parsed, original_text=""):
-    """Remove soft skills that don't actually appear in the original JD text."""
+    """Remove soft skills that don't actually appear in the original JD text.
+    Uses keyword-based matching: checks if the core keyword of each extracted
+    soft skill appears anywhere in the text, rather than requiring an exact
+    full-phrase match."""
     soft = parsed.get("soft_skills")
     if not isinstance(soft, list) or not original_text:
         return
     lower_text = original_text.lower()
-    # Known soft skill keywords to validate against
-    _VALID_SOFT_SKILLS = {
-        "communication", "leadership", "teamwork", "problem-solving", "problem solving",
-        "analytical", "interpersonal", "collaboration", "presentation", "negotiation",
-        "mentoring", "coaching", "adaptability", "creativity", "critical thinking",
-        "decision making", "decision-making", "time management", "organizational",
-        "attention to detail", "troubleshooting", "documentation", "customer-focused",
-        "self-starter", "multitasking", "conflict resolution", "strategic thinking",
+
+    # Map of canonical soft skill names to the text keywords that validate them
+    _SOFT_SKILL_KEYWORDS = {
+        "communication": ["communication", "communicate"],
+        "leadership": ["leadership", "leading", "lead teams"],
+        "teamwork": ["teamwork", "team work", "team player", "team-oriented"],
+        "problem solving": ["problem-solving", "problem solving", "troubleshoot"],
+        "problem-solving": ["problem-solving", "problem solving", "troubleshoot"],
+        "analytical": ["analytical", "analysis", "analyze", "analysing"],
+        "interpersonal": ["interpersonal", "people skills"],
+        "collaboration": ["collaboration", "collaborate", "collaborative", "cross-functional"],
+        "presentation": ["presentation", "presenting"],
+        "negotiation": ["negotiation", "negotiate"],
+        "mentoring": ["mentoring", "mentor"],
+        "coaching": ["coaching", "coach"],
+        "adaptability": ["adaptability", "adaptable", "flexible"],
+        "creativity": ["creativity", "creative", "innovative"],
+        "critical thinking": ["critical thinking"],
+        "decision making": ["decision making", "decision-making"],
+        "decision-making": ["decision making", "decision-making"],
+        "time management": ["time management", "time-management"],
+        "organizational": ["organizational", "organisational", "organizing"],
+        "attention to detail": ["attention to detail", "detail-oriented", "detail oriented"],
+        "troubleshooting": ["troubleshooting", "troubleshoot", "diagnose"],
+        "documentation": ["documentation", "documenting", "technical writing"],
+        "customer-focused": ["customer-focused", "customer focused", "client-focused"],
+        "self-starter": ["self-starter", "self starter", "self-motivated"],
+        "multitasking": ["multitasking", "multi-tasking", "multitask"],
+        "conflict resolution": ["conflict resolution"],
+        "strategic thinking": ["strategic thinking", "strategic"],
+        "stakeholder management": ["stakeholder"],
+        "relationship management": ["relationship management", "relationship building"],
     }
+
     validated = []
+    seen = set()
     for s in soft:
         if not isinstance(s, str):
             continue
         s_lower = s.lower().strip()
-        # Must appear in text AND be a recognized soft skill
-        if s_lower in lower_text and any(kw in s_lower for kw in _VALID_SOFT_SKILLS):
-            validated.append(s)
+        if s_lower in seen:
+            continue
+
+        # Look up keywords for this skill, or fall back to checking the skill name itself
+        keywords = _SOFT_SKILL_KEYWORDS.get(s_lower)
+        if keywords:
+            # Known soft skill — check if any of its keywords appear in the text
+            if any(kw in lower_text for kw in keywords):
+                validated.append(s)
+                seen.add(s_lower)
+        else:
+            # Unknown soft skill — only accept if it's short (≤3 words, ≤30 chars)
+            # and its core keyword appears in the text
+            if len(s_lower) > 30:
+                continue
+            words = s_lower.replace("-", " ").split()
+            if len(words) > 3:
+                continue
+            # Must have at least one word that's a plausible soft skill indicator
+            _SKILL_INDICATORS = {
+                "skills", "ability", "thinking", "solving", "making",
+                "management", "resolution", "oriented", "focused",
+                "starter", "tasking", "building",
+            }
+            core_words = [w for w in words if len(w) > 3]
+            has_indicator = any(w in _SKILL_INDICATORS for w in words)
+            # Accept only if it has a skill indicator word AND appears in text
+            if has_indicator and core_words and any(w in lower_text for w in core_words):
+                validated.append(s)
+                seen.add(s_lower)
     parsed["soft_skills"] = validated
+
+
+def _fix_soft_skills_from_text(parsed, original_text=""):
+    """Scan the full JD text for soft skill keywords and add any that the LLM missed.
+    Also deduplicates: if LLM returned 'problem-solving' and we'd add 'Problem Solving',
+    we replace the LLM's variant with the canonical form to avoid duplication."""
+    if not original_text:
+        return
+    lower_text = original_text.lower()
+    existing = parsed.get("soft_skills") or []
+
+    # Canonical skills to scan for
+    _SCAN_SKILLS = [
+        ("Communication", ["communication", "communicate"]),
+        ("Leadership", ["leadership"]),
+        ("Teamwork", ["teamwork"]),
+        ("Problem Solving", ["problem-solving", "problem solving"]),
+        ("Analytical", ["analytical"]),
+        ("Collaboration", ["collaboration", "collaborate", "collaborative"]),
+        ("Presentation", ["presentation skills"]),
+        ("Negotiation", ["negotiation"]),
+        ("Mentoring", ["mentoring"]),
+        ("Organizational", ["organizational"]),
+        ("Attention to Detail", ["attention to detail", "detail-oriented"]),
+        ("Troubleshooting", ["troubleshooting"]),
+        ("Documentation", ["documentation skills"]),
+        ("Stakeholder Management", ["stakeholder management"]),
+        ("Time Management", ["time management"]),
+        ("Adaptability", ["adaptability"]),
+        ("Critical Thinking", ["critical thinking"]),
+        ("Decision Making", ["decision-making", "decision making"]),
+        ("Interpersonal", ["interpersonal"]),
+        ("Self-Starter", ["self-starter", "self starter"]),
+        ("Customer-Focused", ["customer-focused", "customer focused"]),
+        ("Conflict Resolution", ["conflict resolution"]),
+        ("Strategic Thinking", ["strategic thinking"]),
+    ]
+
+    # Build a map from keywords to canonical names for deduplication
+    _keyword_to_canonical = {}
+    for skill_name, keywords in _SCAN_SKILLS:
+        for kw in keywords:
+            _keyword_to_canonical[kw] = skill_name
+        # Also map the canonical name itself and common variants
+        _keyword_to_canonical[skill_name.lower()] = skill_name
+        _keyword_to_canonical[skill_name.lower().replace(" ", "-")] = skill_name
+
+    # Deduplicate existing: replace LLM variants with canonical forms
+    canonical_seen = set()
+    deduped = []
+    for s in existing:
+        if not isinstance(s, str):
+            continue
+        s_lower = s.lower().strip()
+        canonical = _keyword_to_canonical.get(s_lower)
+        if canonical:
+            if canonical.lower() not in canonical_seen:
+                deduped.append(canonical)
+                canonical_seen.add(canonical.lower())
+        else:
+            if s_lower not in canonical_seen:
+                deduped.append(s)
+                canonical_seen.add(s_lower)
+
+    # Add any missing canonical skills found in text
+    for skill_name, keywords in _SCAN_SKILLS:
+        if skill_name.lower() in canonical_seen:
+            continue
+        if any(kw in lower_text for kw in keywords):
+            deduped.append(skill_name)
+            canonical_seen.add(skill_name.lower())
+
+    parsed["soft_skills"] = deduped
 
 
 def _fix_benefits_hallucination(parsed, original_text=""):
@@ -1152,6 +1348,218 @@ def _fix_expiry_date_from_text(parsed, original_text=""):
     if match:
         m, d, y = match.group(1), match.group(2), match.group(3)
         parsed["job_expiry_date"] = f"{y}-{m.zfill(2)}-{d.zfill(2)}"
+
+
+def _extract_section(text, section_headers, stop_headers=None):
+    """Extract text between a section header and the next section header.
+
+    Args:
+        text: The full JD text
+        section_headers: List of possible header patterns for the target section
+        stop_headers: List of header patterns that mark the end of the section
+
+    Returns:
+        The extracted section text, or empty string if not found.
+    """
+    if not text:
+        return ""
+
+    # Strip Unicode zero-width characters that PDFs often include after headers
+    text = text.replace('\u200b', '').replace('\u200c', '').replace('\u200d', '').replace('\ufeff', '')
+
+    _DEFAULT_STOP_HEADERS = [
+        r'(?:key\s+)?responsibilities\s*[:\-\n]',
+        r'(?:required\s+)?qualifications\s*[:\-\n]',
+        r'requirements?\s*[:\-\n]',
+        r'required\s+skills\s*[:\-\n]',
+        r'preferred\s+skills\s*[:\-\n]',
+        r'(?:technical|soft)\s+skills\s*[:\-\n]',
+        r'education\s*[:\-\n]',
+        r'experience\s*[:\-\n]',
+        r'compensation\s*[:\-\n]',
+        r'salary\s*[:\-\n]',
+        r'benefits\s*[:\-\n]',
+        r'preferred\s+(?:qualifications|experience)\s*[:\-\n]',
+        r'nice[\s\-]+to[\s\-]+have\s*[:\-\n]',
+        r'certifications?\s*[:\-\n]',
+        r'additional\s+(?:info|information|details)\s*[:\-\n]',
+        r'reporting\s+(?:to|structure)\s*[:\-\n]',
+        r'travel\s*[:\-\n]',
+        r'application\s*[:\-\n]',
+        r'equal\s+opportunity\s*[:\-\n]',
+    ]
+    stops = stop_headers or _DEFAULT_STOP_HEADERS
+
+    for header_pat in section_headers:
+        match = re.search(header_pat, text, re.IGNORECASE | re.MULTILINE)
+        if not match:
+            continue
+
+        # Start right after the header line — skip any trailing whitespace/colons/dashes/ZWS
+        start_pos = match.end()
+        while start_pos < len(text) and text[start_pos] in ' \t\u200b\u200c\u200d\ufeff:-':
+            start_pos += 1
+        if start_pos < len(text) and text[start_pos] == '\n':
+            start_pos += 1
+
+        # Find the next section header
+        end_pos = len(text)
+        for stop_pat in stops:
+            stop_match = re.search(stop_pat, text[start_pos:], re.IGNORECASE | re.MULTILINE)
+            if stop_match:
+                candidate = start_pos + stop_match.start()
+                if candidate < end_pos:
+                    end_pos = candidate
+
+        section_text = text[start_pos:end_pos].strip()
+        # Clean up: remove leading colons, dashes, newlines
+        section_text = re.sub(r'^[\s:\-]+', '', section_text).strip()
+        if len(section_text) > 20:
+            return section_text
+
+    return ""
+
+
+def _fix_summary_from_text(parsed, original_text=""):
+    """If job_summary is only 1 sentence, try to extract the full section from the text."""
+    summary = parsed.get("job_summary")
+    if not original_text:
+        return
+    if not isinstance(summary, str) or not summary:
+        # Try to extract from text if completely missing
+        section = _extract_section(original_text, [
+            r'(?:^|\n)\s*role\s+summary\s*(?:/\s*objective)?\s*[:\-]?\s*\n',
+            r'(?:^|\n)\s*summary\s*[:\-/]\s*(?:objective)?\s*\n',
+            r'(?:^|\n)\s*objective\s*[:\-]\s*\n',
+            r'(?:^|\n)\s*scope\s*/?\s*description\s+of\s+services\s*[:\-]?\s*\n',
+            r'(?:^|\n)\s*overview\s*[:\-]\s*\n',
+            r'(?:^|\n)\s*job\s+description\s*:\s*\n',
+            r'(?:^|\n)\s*description\s+of\s+services\s*[:\-]?\s*\n',
+        ])
+        if section:
+            parsed["job_summary"] = section
+        return
+
+    # Check if the current summary is just 1 sentence (ends with period, no more periods)
+    sentence_count = len(re.findall(r'[.!?]\s', summary + " "))
+    if sentence_count <= 1 and len(summary) < 400:
+        section = _extract_section(original_text, [
+            r'(?:^|\n)\s*role\s+summary\s*(?:/\s*objective)?\s*[:\-]?\s*\n',
+            r'(?:^|\n)\s*summary\s*[:\-/]\s*(?:objective)?\s*\n',
+            r'(?:^|\n)\s*objective\s*[:\-]\s*\n',
+            r'(?:^|\n)\s*scope\s*/?\s*description\s+of\s+services\s*[:\-]?\s*\n',
+            r'(?:^|\n)\s*overview\s*[:\-]\s*\n',
+            r'(?:^|\n)\s*job\s+description\s*:\s*\n',
+            r'(?:^|\n)\s*description\s+of\s+services\s*[:\-]?\s*\n',
+        ])
+        if section and len(section) > len(summary):
+            parsed["job_summary"] = section
+
+
+def _fix_description_from_text(parsed, original_text=""):
+    """If description is only 1 sentence or missing, extract the full section from text."""
+    desc = parsed.get("description")
+    if not original_text:
+        return
+
+    section = _extract_section(original_text, [
+        r'(?:^|\n)\s*job\s+description\s*:\s*\n',
+        r'(?:^|\n)\s*description\s+of\s+services\s*[:\-]?\s*\n',
+        r'(?:^|\n)\s*about\s+the\s+role\s*[:\-]?\s*\n',
+        r'(?:^|\n)\s*position\s+description\s*[:\-]?\s*\n',
+        r'(?:^|\n)\s*role\s+description\s*[:\-]?\s*\n',
+        r'(?:^|\n)\s*scope\s*/?\s*description\s+of\s+services\s*[:\-]?\s*\n',
+    ])
+
+    if not isinstance(desc, str) or not desc:
+        if section:
+            parsed["description"] = section
+        return
+
+    # Replace if current is just 1 sentence and we found a fuller version
+    sentence_count = len(re.findall(r'[.!?]\s', desc + " "))
+    if sentence_count <= 1 and section and len(section) > len(desc):
+        parsed["description"] = section
+
+
+def _fix_company_overview_from_text(parsed, original_text=""):
+    """If company_overview is only 1 sentence, extract the full section from text."""
+    overview = parsed.get("company_overview")
+    if not original_text:
+        return
+
+    section = _extract_section(original_text, [
+        r'(?:^|\n)\s*company\s+overview\s*[:\-]?\s*\n',
+        r'(?:^|\n)\s*about\s+(?:the\s+)?company\s*[:\-]?\s*\n',
+        r'(?:^|\n)\s*about\s+us\s*[:\-]?\s*\n',
+        r'(?:^|\n)\s*organization\s+overview\s*[:\-]?\s*\n',
+    ])
+
+    if not isinstance(overview, str) or not overview:
+        if section:
+            parsed["company_overview"] = section
+        return
+
+    sentence_count = len(re.findall(r'[.!?]\s', overview + " "))
+    if sentence_count <= 1 and section and len(section) > len(overview):
+        parsed["company_overview"] = section
+
+
+def _fix_contract_details(parsed, original_text=""):
+    """Extract contract_type and contract_duration from text if not already set."""
+    if not original_text:
+        return
+    lower_text = original_text.lower()
+
+    # contract_type
+    if not parsed.get("contract_type"):
+        if "c2c" in lower_text or "corp-to-corp" in lower_text or "corp to corp" in lower_text:
+            parsed["contract_type"] = "C2C"
+        elif re.search(r'\bw2\b', lower_text):
+            parsed["contract_type"] = "W2"
+        elif "1099" in lower_text:
+            parsed["contract_type"] = "1099"
+
+    # contract_duration
+    if not parsed.get("contract_duration"):
+        match = re.search(r'duration\s*[:\-]\s*(.+?)(?:\n|$)', original_text, re.IGNORECASE)
+        if match:
+            dur = match.group(1).strip().rstrip('\u200b').strip()
+            if dur:
+                parsed["contract_duration"] = dur
+
+
+def _fix_skill_experience_from_requirements(parsed, original_text=""):
+    """Back-populate required_years on skills by scanning requirements for 'X years of [skill]' patterns."""
+    skills = parsed.get("skills")
+    if not isinstance(skills, list) or not original_text:
+        return
+
+    # Build a lookup of skill names (lowercase) to skill objects
+    skill_map = {}
+    for skill in skills:
+        if isinstance(skill, dict):
+            name = skill.get("name", "").strip().lower()
+            if name:
+                skill_map[name] = skill
+
+    # Scan for patterns like "X years of [text]" or "X Years of Experience in [text]"
+    patterns = [
+        r'(\d+)\s*(?:\+\s*)?years?\s+(?:of\s+)?(?:experience\s+(?:in|with)\s+)?(.+?)(?:[.\n]|$)',
+        r'(\d+)\s*[\-–]\s*\d+\s*years?\s+(?:of\s+)?(?:experience\s+(?:in|with)\s+)?(.+?)(?:[.\n]|$)',
+    ]
+
+    for pat in patterns:
+        for match in re.finditer(pat, original_text, re.IGNORECASE):
+            years = int(match.group(1))
+            context = match.group(2).strip().lower()
+
+            # Check if any skill name appears in this context
+            for skill_name, skill_obj in skill_map.items():
+                if skill_obj.get("required_years") is not None:
+                    continue  # Already set by LLM
+                if skill_name in context:
+                    skill_obj["required_years"] = years
 
 
 # ---------------------------------------------------------------------------
